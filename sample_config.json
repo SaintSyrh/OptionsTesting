@@ -1,0 +1,46 @@
+{
+  "base_parameters": {
+    "asset_value": "2000000",
+    "total_shares": "150000",
+    "volatility": "0.35",
+    "risk_free_rate": "0.04",
+    "delivery_date": "2025-12-15"
+  },
+  "tranches": [
+    {
+      "entity": "Company A",
+      "tranche_num": "1",
+      "option_type": "call",
+      "strike_price": "15.00",
+      "num_options": "2000"
+    },
+    {
+      "entity": "Company A",
+      "tranche_num": "2",
+      "option_type": "call",
+      "strike_price": "18.00",
+      "num_options": "1500"
+    },
+    {
+      "entity": "Company B",
+      "tranche_num": "3",
+      "option_type": "put",
+      "strike_price": "10.00",
+      "num_options": "1000"
+    },
+    {
+      "entity": "Company B",
+      "tranche_num": "4",
+      "option_type": "call",
+      "strike_price": "20.00",
+      "num_options": "500"
+    },
+    {
+      "entity": "Company C",
+      "tranche_num": "5",
+      "option_type": "call",
+      "strike_price": "14.00",
+      "num_options": "1800"
+    }
+  ]
+}
