@@ -102,15 +102,15 @@ def main():
     with col1:
         if st.button("📊 Phase 1: Entities", disabled=(current_phase == 1)):
             st.session_state.current_phase = 1
-            st.experimental_rerun()
+            st.rerun()
     with col2:
         if st.button("💼 Phase 2: Tranches", disabled=(current_phase == 2)):
             st.session_state.current_phase = 2  
-            st.experimental_rerun()
+            st.rerun()
     with col3:
         if st.button("💰 Phase 3: Analysis", disabled=(current_phase == 3)):
             st.session_state.current_phase = 3
-            st.experimental_rerun()
+            st.rerun()
     
     st.markdown("---")
     
@@ -136,7 +136,6 @@ def display_phase_1():
         
         with col2:
             loan_amount = st.number_input("Loan Amount ($)", min_value=1.0, value=1000000.0, format="%.0f")
-            expected_return = st.number_input("Expected Return (%)", min_value=0.0, max_value=100.0, value=10.0) / 100
         
         if st.form_submit_button("Add Entity", type="primary"):
             if entity_name:
@@ -144,13 +143,12 @@ def display_phase_1():
                     'name': entity_name,
                     'loan_duration': loan_duration,
                     'loan_amount': loan_amount,
-                    'expected_return': expected_return,
                     'created_at': datetime.now().isoformat()
                 }
                 
                 st.session_state.entities.append(new_entity)
                 st.success(f"✅ Added entity: {entity_name}")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Please enter an entity name")
     
@@ -166,17 +164,17 @@ def display_phase_1():
                 with col2:
                     st.metric("Duration", f"{entity['loan_duration']} days")
                 with col3:
-                    st.metric("Expected Return", f"{entity['expected_return']:.1%}")
+                    st.metric("Entity ID", f"#{i+1}")
                 
                 if st.button(f"Remove {entity['name']}", key=f"remove_entity_{i}"):
                     st.session_state.entities.pop(i)
-                    st.experimental_rerun()
+                    st.rerun()
     
     # Next phase button
     if st.session_state.entities:
         if st.button("➡️ Proceed to Tranche Configuration", type="primary"):
             st.session_state.current_phase = 2
-            st.experimental_rerun()
+            st.rerun()
 
 def display_phase_2():
     """Phase 2: Tranche Configuration"""
@@ -230,7 +228,7 @@ def display_phase_2():
                 
                 st.session_state.tranches.append(new_tranche)
                 st.success(f"✅ Added {option_type} tranche for {selected_entity}: ${option_price:.2f}")
-                st.experimental_rerun()
+                st.rerun()
                 
             except Exception as e:
                 st.error(f"❌ Error calculating option: {str(e)}")
@@ -260,7 +258,7 @@ def display_phase_2():
     if st.session_state.tranches:
         if st.button("➡️ Proceed to Depth Analysis", type="primary"):
             st.session_state.current_phase = 3
-            st.experimental_rerun()
+            st.rerun()
 
 def display_phase_3():
     """Phase 3: Market Depth Analysis"""
@@ -301,7 +299,7 @@ def display_phase_3():
             
             st.session_state.depths.append(new_depth)
             st.success(f"✅ Added depth data for {selected_entity} on {selected_exchange}")
-            st.experimental_rerun()
+            st.rerun()
     
     # Display depth analysis
     if st.session_state.depths:
@@ -421,7 +419,7 @@ with st.sidebar:
         st.session_state.depths = []
         st.session_state.current_phase = 1
         st.success("✅ All data cleared")
-        st.experimental_rerun()
+        st.rerun()
 
 if __name__ == "__main__":
     main()
