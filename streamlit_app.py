@@ -380,9 +380,9 @@ def phase_3_quoting_depths():
         with col2:
             selected_exchange = st.selectbox("Exchange", exchanges)
         
-        # Quoting depth inputs
+        # Bid/Ask Spread
         st.markdown("**Market Depth Information**")
-        col3, col4, col5, col6 = st.columns(4)
+        col3, col4 = st.columns(2)
         
         with col3:
             bid_ask_spread = st.number_input(
@@ -396,34 +396,109 @@ def phase_3_quoting_depths():
             )
         
         with col4:
-            depth_50bps = st.number_input(
-                "Depth @ 50bps ($)",
-                min_value=0.0,
-                value=50000.0,
-                step=1000.0,
-                format="%.0f",
-                help="Liquidity depth at 50 basis points"
-            )
+            # Get entity's loan value for percentage calculations
+            entity_info = next(e for e in st.session_state.entities_data if e['name'] == selected_entity)
+            entity_tranches = [t for t in st.session_state.tranches_data if t['entity'] == selected_entity]
+            
+            if entity_tranches:
+                # Calculate total entity loan value (simplified - could be more sophisticated)
+                total_entity_value = sum(
+                    (t.get('token_percentage', 0) / 100.0 if t.get('token_percentage') else 
+                     (t.get('token_count', 0) / 100000.0)) * 1000000  # Rough estimate
+                    for t in entity_tranches
+                )
+                st.info(f"**Entity Loan Value:** ${total_entity_value:,.0f} (estimated)")
+            else:
+                total_entity_value = 1000000  # Default fallback
+                st.info("**Entity Loan Value:** Not calculated yet")
         
-        with col5:
-            depth_100bps = st.number_input(
-                "Depth @ 100bps ($)",
-                min_value=0.0,
-                value=100000.0,
-                step=1000.0,
-                format="%.0f",
-                help="Liquidity depth at 100 basis points"
-            )
+        # Depth input method selection
+        st.markdown("**Depth Quoting Method:**")
+        depth_method = st.radio(
+            "Choose depth input method:",
+            ["Absolute Values ($)", "Percentage of Loan Value (%)"],
+            horizontal=True,
+            key="depth_method_selector"
+        )
         
-        with col6:
-            depth_200bps = st.number_input(
-                "Depth @ 200bps ($)",
-                min_value=0.0,
-                value=200000.0,
-                step=1000.0,
-                format="%.0f",
-                help="Liquidity depth at 200 basis points"
-            )
+        # Depth inputs based on method
+        st.markdown("**Liquidity Depths:**")
+        col5, col6, col7 = st.columns(3)
+        
+        if depth_method == "Absolute Values ($)":
+            with col5:
+                depth_50bps = st.number_input(
+                    "Depth @ 50bps ($)",
+                    min_value=0.0,
+                    value=50000.0,
+                    step=1000.0,
+                    format="%.0f",
+                    help="Absolute liquidity depth at 50 basis points"
+                )
+                depth_50bps_pct = None
+            
+            with col6:
+                depth_100bps = st.number_input(
+                    "Depth @ 100bps ($)",
+                    min_value=0.0,
+                    value=100000.0,
+                    step=1000.0,
+                    format="%.0f",
+                    help="Absolute liquidity depth at 100 basis points"
+                )
+                depth_100bps_pct = None
+            
+            with col7:
+                depth_200bps = st.number_input(
+                    "Depth @ 200bps ($)",
+                    min_value=0.0,
+                    value=200000.0,
+                    step=1000.0,
+                    format="%.0f",
+                    help="Absolute liquidity depth at 200 basis points"
+                )
+                depth_200bps_pct = None
+        
+        else:  # Percentage method
+            with col5:
+                depth_50bps_pct = st.number_input(
+                    "Depth @ 50bps (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=5.0,
+                    step=0.1,
+                    format="%.1f",
+                    help="Liquidity depth as percentage of loan value"
+                )
+                depth_50bps = (depth_50bps_pct / 100.0) * total_entity_value
+            
+            with col6:
+                depth_100bps_pct = st.number_input(
+                    "Depth @ 100bps (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=10.0,
+                    step=0.1,
+                    format="%.1f",
+                    help="Liquidity depth as percentage of loan value"
+                )
+                depth_100bps = (depth_100bps_pct / 100.0) * total_entity_value
+            
+            with col7:
+                depth_200bps_pct = st.number_input(
+                    "Depth @ 200bps (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=20.0,
+                    step=0.1,
+                    format="%.1f",
+                    help="Liquidity depth as percentage of loan value"
+                )
+                depth_200bps = (depth_200bps_pct / 100.0) * total_entity_value
+        
+        # Show calculated values
+        if depth_method == "Percentage of Loan Value (%)":
+            st.info(f"**Calculated Depths:** 50bps: ${depth_50bps:,.0f}, 100bps: ${depth_100bps:,.0f}, 200bps: ${depth_200bps:,.0f}")
         
         if st.form_submit_button("Add Quoting Depth", use_container_width=True):
             # Check if this entity-exchange combination already exists
@@ -439,9 +514,14 @@ def phase_3_quoting_depths():
                     'entity': selected_entity,
                     'exchange': selected_exchange,
                     'bid_ask_spread': bid_ask_spread,
+                    'depth_method': depth_method,
                     'depth_50bps': depth_50bps,
                     'depth_100bps': depth_100bps,
-                    'depth_200bps': depth_200bps
+                    'depth_200bps': depth_200bps,
+                    'depth_50bps_pct': depth_50bps_pct,
+                    'depth_100bps_pct': depth_100bps_pct,
+                    'depth_200bps_pct': depth_200bps_pct,
+                    'entity_loan_value': total_entity_value
                 }
                 st.session_state.quoting_depths_data.append(new_entry)
                 st.success(f"Added quoting depth for {selected_entity} on {selected_exchange}")
@@ -476,9 +556,14 @@ def display_quoting_depths_table():
         df = pd.DataFrame(sorted_data)
         df['Row #'] = range(1, len(df) + 1)
         
-        # Reorder columns
-        cols = ['Row #', 'entity', 'exchange', 'bid_ask_spread', 'depth_50bps', 'depth_100bps', 'depth_200bps']
-        df = df[cols]
+        # Reorder columns and add method info
+        cols = ['Row #', 'entity', 'exchange', 'depth_method', 'bid_ask_spread', 'depth_50bps', 'depth_100bps', 'depth_200bps']
+        # Only include method column if it exists in the data
+        if 'depth_method' in df.columns:
+            df = df[cols]
+        else:
+            cols = ['Row #', 'entity', 'exchange', 'bid_ask_spread', 'depth_50bps', 'depth_100bps', 'depth_200bps']
+            df = df[cols]
         
         # Display table
         st.dataframe(
@@ -488,6 +573,7 @@ def display_quoting_depths_table():
                 "Row #": st.column_config.NumberColumn("Row #", format="%d", width="small"),
                 "entity": "Entity",
                 "exchange": "Exchange",
+                "depth_method": "Method",
                 "bid_ask_spread": st.column_config.NumberColumn("B/A Spread (bps)", format="%.1f"),
                 "depth_50bps": st.column_config.NumberColumn("Depth @ 50bps ($)", format="$%.0f"),
                 "depth_100bps": st.column_config.NumberColumn("Depth @ 100bps ($)", format="$%.0f"),
@@ -552,6 +638,205 @@ def display_quoting_depths_table():
             total_entries = len(st.session_state.quoting_depths_data)
             unique_entities = len(set(e['entity'] for e in st.session_state.quoting_depths_data))
             st.info(f"**{total_entries}** entries\\n**{unique_entities}** entities")
+
+def calculate_depth_value_analysis(params):
+    """Calculate volatility-based capital value analysis for quoting depths"""
+    if not st.session_state.quoting_depths_data:
+        return None
+    
+    analysis_results = {
+        'entity_analyses': {},
+        'overall_metrics': {}
+    }
+    
+    volatility = params['volatility']
+    
+    # Define depth tier multipliers (further from TOB = lower value)
+    depth_multipliers = {
+        '50bps': 1.0,    # Full value at tightest spread
+        '100bps': 0.75,  # 25% reduction for wider spread
+        '200bps': 0.50   # 50% reduction for widest spread
+    }
+    
+    # Volatility adjustment factors (higher volatility = higher risk = lower quote value)
+    vol_adjustment = max(0.3, 1.0 - (volatility * 2))  # Scales from 0.3 to 1.0 based on volatility
+    
+    for entry in st.session_state.quoting_depths_data:
+        entity = entry['entity']
+        exchange = entry['exchange']
+        
+        if entity not in analysis_results['entity_analyses']:
+            analysis_results['entity_analyses'][entity] = {
+                'exchanges': {},
+                'total_quoted_value': 0,
+                'effective_quoted_value': 0,
+                'avg_spread': 0,
+                'depth_distribution': {'50bps': 0, '100bps': 0, '200bps': 0}
+            }
+        
+        # Calculate effective depths with volatility and tier adjustments
+        effective_50bps = entry['depth_50bps'] * depth_multipliers['50bps'] * vol_adjustment
+        effective_100bps = entry['depth_100bps'] * depth_multipliers['100bps'] * vol_adjustment
+        effective_200bps = entry['depth_200bps'] * depth_multipliers['200bps'] * vol_adjustment
+        
+        total_quoted = entry['depth_50bps'] + entry['depth_100bps'] + entry['depth_200bps']
+        total_effective = effective_50bps + effective_100bps + effective_200bps
+        
+        exchange_analysis = {
+            'bid_ask_spread': entry['bid_ask_spread'],
+            'raw_depths': {
+                '50bps': entry['depth_50bps'],
+                '100bps': entry['depth_100bps'],
+                '200bps': entry['depth_200bps']
+            },
+            'effective_depths': {
+                '50bps': effective_50bps,
+                '100bps': effective_100bps,
+                '200bps': effective_200bps
+            },
+            'total_quoted_value': total_quoted,
+            'total_effective_value': total_effective,
+            'efficiency_ratio': total_effective / total_quoted if total_quoted > 0 else 0,
+            'depth_method': entry.get('depth_method', 'Absolute Values ($)'),
+            'percentages': {
+                '50bps': entry.get('depth_50bps_pct'),
+                '100bps': entry.get('depth_100bps_pct'),
+                '200bps': entry.get('depth_200bps_pct')
+            }
+        }
+        
+        analysis_results['entity_analyses'][entity]['exchanges'][exchange] = exchange_analysis
+        analysis_results['entity_analyses'][entity]['total_quoted_value'] += total_quoted
+        analysis_results['entity_analyses'][entity]['effective_quoted_value'] += total_effective
+        
+        # Update depth distribution
+        analysis_results['entity_analyses'][entity]['depth_distribution']['50bps'] += entry['depth_50bps']
+        analysis_results['entity_analyses'][entity]['depth_distribution']['100bps'] += entry['depth_100bps']
+        analysis_results['entity_analyses'][entity]['depth_distribution']['200bps'] += entry['depth_200bps']
+    
+    # Calculate overall metrics
+    total_quoted = sum(entity['total_quoted_value'] for entity in analysis_results['entity_analyses'].values())
+    total_effective = sum(entity['effective_quoted_value'] for entity in analysis_results['entity_analyses'].values())
+    
+    analysis_results['overall_metrics'] = {
+        'total_quoted_value': total_quoted,
+        'total_effective_value': total_effective,
+        'overall_efficiency': total_effective / total_quoted if total_quoted > 0 else 0,
+        'volatility_adjustment': vol_adjustment,
+        'depth_tier_impact': {
+            '50bps_multiplier': depth_multipliers['50bps'],
+            '100bps_multiplier': depth_multipliers['100bps'],
+            '200bps_multiplier': depth_multipliers['200bps']
+        }
+    }
+    
+    return analysis_results
+
+def display_depth_value_analysis(params):
+    """Display the depth value analysis results"""
+    analysis = calculate_depth_value_analysis(params)
+    
+    if not analysis:
+        return
+    
+    st.markdown("## Depth Value Analysis")
+    st.markdown("*Analysis of capital value considering asset volatility and depth tier positioning*")
+    
+    # Overall metrics
+    overall = analysis['overall_metrics']
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "Total Quoted Value",
+            f"${overall['total_quoted_value']:,.0f}",
+            help="Sum of all liquidity depths across entities and exchanges"
+        )
+    
+    with col2:
+        st.metric(
+            "Effective Value",
+            f"${overall['total_effective_value']:,.0f}",
+            help="Adjusted value considering volatility and depth tier drop-offs"
+        )
+    
+    with col3:
+        efficiency_pct = overall['overall_efficiency'] * 100
+        st.metric(
+            "Overall Efficiency",
+            f"{efficiency_pct:.1f}%",
+            help="Ratio of effective value to quoted value"
+        )
+    
+    with col4:
+        vol_adj_pct = overall['volatility_adjustment'] * 100
+        st.metric(
+            "Volatility Adjustment",
+            f"{vol_adj_pct:.1f}%",
+            help="Value reduction due to asset volatility"
+        )
+    
+    # Entity-level analysis
+    st.markdown("### Entity Analysis")
+    
+    entity_summary = []
+    for entity_name, entity_data in analysis['entity_analyses'].items():
+        efficiency = (entity_data['effective_quoted_value'] / entity_data['total_quoted_value'] 
+                     if entity_data['total_quoted_value'] > 0 else 0)
+        
+        entity_summary.append({
+            'Entity': entity_name,
+            'Exchanges': len(entity_data['exchanges']),
+            'Total Quoted ($)': f"${entity_data['total_quoted_value']:,.0f}",
+            'Effective Value ($)': f"${entity_data['effective_quoted_value']:,.0f}",
+            'Efficiency (%)': f"{efficiency*100:.1f}%",
+            'Depth @ 50bps ($)': f"${entity_data['depth_distribution']['50bps']:,.0f}",
+            'Depth @ 100bps ($)': f"${entity_data['depth_distribution']['100bps']:,.0f}",
+            'Depth @ 200bps ($)': f"${entity_data['depth_distribution']['200bps']:,.0f}"
+        })
+    
+    st.dataframe(pd.DataFrame(entity_summary), use_container_width=True)
+    
+    # Detailed exchange breakdown
+    with st.expander("Detailed Exchange Analysis"):
+        for entity_name, entity_data in analysis['entity_analyses'].items():
+            st.markdown(f"#### {entity_name}")
+            
+            exchange_details = []
+            for exchange, exc_data in entity_data['exchanges'].items():
+                exchange_details.append({
+                    'Exchange': exchange,
+                    'Spread (bps)': f"{exc_data['bid_ask_spread']:.1f}",
+                    'Method': exc_data['depth_method'],
+                    'Raw 50bps': f"${exc_data['raw_depths']['50bps']:,.0f}",
+                    'Raw 100bps': f"${exc_data['raw_depths']['100bps']:,.0f}",
+                    'Raw 200bps': f"${exc_data['raw_depths']['200bps']:,.0f}",
+                    'Effective 50bps': f"${exc_data['effective_depths']['50bps']:,.0f}",
+                    'Effective 100bps': f"${exc_data['effective_depths']['100bps']:,.0f}",
+                    'Effective 200bps': f"${exc_data['effective_depths']['200bps']:,.0f}",
+                    'Efficiency': f"{exc_data['efficiency_ratio']*100:.1f}%"
+                })
+            
+            st.dataframe(pd.DataFrame(exchange_details), use_container_width=True)
+    
+    # Methodology explanation
+    with st.expander("Analysis Methodology"):
+        st.markdown("""
+        **Depth Tier Value Multipliers:**
+        - **50bps depth**: 100% value (closest to top-of-book)
+        - **100bps depth**: 75% value (25% reduction for wider spread)
+        - **200bps depth**: 50% value (50% reduction for widest spread)
+        
+        **Volatility Adjustment:**
+        - Higher asset volatility reduces quote value due to increased risk
+        - Adjustment formula: max(0.3, 1.0 - (volatility × 2))
+        - Current volatility: {:.1%} → Adjustment: {:.1%}
+        
+        **Efficiency Ratio:**
+        - Measures how much effective value is retained after adjustments
+        - Higher ratios indicate better quote positioning and risk management
+        """.format(params['volatility'], overall['volatility_adjustment']))
 
 def display_tranches_table():
     """Display current tranches in an editable table"""
@@ -987,6 +1272,10 @@ def main():
             required_entities = set(tranche['entity'] for tranche in st.session_state.tranches_data)
             
             if required_entities.issubset(entities_with_depths):
+                # Display depth value analysis first
+                display_depth_value_analysis(params)
+                
+                # Then show options calculations and results
                 calculate_options(params)
                 display_results(params)
             else:
