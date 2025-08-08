@@ -9,7 +9,9 @@
       "Bash(pip install:*)",
       "Bash(timeout 10s streamlit run:*)",
       "Bash(timeout 15s streamlit run:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

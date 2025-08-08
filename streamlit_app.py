@@ -1,1010 +1,588 @@
-"""
-Modular Options Pricing Calculator - Refactored with clean architecture
-This file serves as the main entry point using modularized components
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-
-# Import modular components
-from config.settings import APP_TITLE, PAGE_LAYOUT, INITIAL_SIDEBAR_STATE
-from config.simple_styles import CORE_CSS, HEADER_HTML, FOOTER_HTML
-from utils.logging_config import get_logger
-from utils.error_handling import error_handler_instance, ui_handler, ErrorHandler
-from utils.comprehensive_validation import (
-    ComprehensiveValidator, ValidationConfig, validate_option_inputs_quick, 
-    validate_depth_inputs_quick, pre_calculation_check
-)
-from utils.validation_integration import validation_handler
-from app.session_state import session_manager
-from app.calculations import calculation_orchestrator
-from ui.sidebar import sidebar_manager
-from ui.phase_navigation import phase_nav_manager
-from ui.entity_setup import entity_setup_manager
-
-# Simple Professional UI Components  
-from ui.simple_components import simple_components
-
-# Existing imports for backward compatibility
+from datetime import datetime
 from option_pricing import black_scholes_call, black_scholes_put, calculate_greeks
 from depth_valuation import DepthValuationModels, generate_trade_size_distribution
 from crypto_depth_calculator import CryptoEffectiveDepthCalculator
 
-logger = get_logger(__name__)
+# Page configuration
+st.set_page_config(
+    page_title="Options Pricing Calculator",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# Simple, clean styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+        border-bottom: 3px solid #1f77b4;
+        padding-bottom: 1rem;
+    }
+    
+    .metric-container {
+        background: linear-gradient(90deg, #f0f2f6, #ffffff);
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #1f77b4;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-class ModularOptionsApp:
-    """Main application class with modular components"""
+def initialize_session_state():
+    """Initialize session state variables"""
+    if 'current_phase' not in st.session_state:
+        st.session_state.current_phase = 1
+    if 'entities_data' not in st.session_state:
+        st.session_state.entities_data = []
+    if 'tranches_data' not in st.session_state:
+        st.session_state.tranches_data = []
+    if 'depths_data' not in st.session_state:
+        st.session_state.depths_data = []
+    if 'calculation_results' not in st.session_state:
+        st.session_state.calculation_results = None
+    # Initialize sidebar parameters
+    if 'params' not in st.session_state:
+        st.session_state.params = {
+            'total_valuation': 1000000.0,
+            'total_tokens': 100000.0,
+            'volatility': 0.30,
+            'risk_free_rate': 0.05
+        }
+
+def create_sidebar():
+    """Create sidebar with base parameters"""
+    st.sidebar.markdown("## Global Parameters")
     
-    def __init__(self):
-        self.session_manager = session_manager
-        self.calculation_orchestrator = calculation_orchestrator
-        self.sidebar_manager = sidebar_manager
-        self.phase_nav_manager = phase_nav_manager
-        self.entity_setup_manager = entity_setup_manager
-        
-        # Professional UI components
-        self.components = simple_components
-        
-        # Initialize validation system
-        self.validator = ComprehensiveValidator(ValidationConfig())
-        self.validation_handler = validation_handler
-        
-        # Initialize session state
-        self.session_manager.initialize_session_state()
-        logger.info("Professional Options App with enhanced UI components initialized")
+    # Market Parameters (simplified inputs)
+    st.sidebar.markdown("### Market Parameters")
+    st.session_state.params['total_valuation'] = st.sidebar.text_input(
+        "Total Token Valuation ($)",
+        value=str(int(st.session_state.params['total_valuation'])),
+        key="sidebar_total_valuation"
+    )
     
-    @ui_handler
-    def setup_page_config(self) -> None:
-        """Setup Streamlit page configuration"""
-        st.set_page_config(
-            page_title=APP_TITLE,
-            layout=PAGE_LAYOUT,
-            initial_sidebar_state=INITIAL_SIDEBAR_STATE
-        )
-        
-        # Apply custom CSS
-        st.markdown(CORE_CSS, unsafe_allow_html=True)
-        logger.debug("Page configuration and styling applied")
+    st.session_state.params['volatility'] = st.sidebar.text_input(
+        "Volatility (%)",
+        value=str(st.session_state.params['volatility'] * 100),
+        key="sidebar_volatility"
+    )
     
-    @ui_handler
-    def display_header(self) -> None:
-        """Display professional application header"""
-        st.markdown(HEADER_HTML, unsafe_allow_html=True)
+    st.session_state.params['risk_free_rate'] = st.sidebar.text_input(
+        "Risk-free Rate (%)",
+        value=str(st.session_state.params['risk_free_rate'] * 100),
+        key="sidebar_risk_free_rate"
+    )
     
-    @ui_handler
-    def display_footer(self) -> None:
-        """Display application footer"""
-        st.markdown("---")
-        st.markdown(FOOTER_HTML, unsafe_allow_html=True)
-        
-    def display_quick_metrics(self) -> None:
-        """Display quick metrics using simple components"""
-        st.subheader("📊 Platform Overview")
-        
-        col1, col2, col3, col4 = st.columns(4)
+    # Convert text inputs to numbers
+    try:
+        total_valuation = float(st.session_state.params['total_valuation'])
+        volatility = float(st.session_state.params['volatility']) / 100.0
+        risk_free_rate = float(st.session_state.params['risk_free_rate']) / 100.0
+    except ValueError:
+        # Use defaults if invalid input
+        total_valuation = 1000000.0
+        volatility = 0.30
+        risk_free_rate = 0.05
+    
+    return {
+        'total_valuation': total_valuation,
+        'volatility': volatility,
+        'risk_free_rate': risk_free_rate
+    }
+
+def phase_1_entity_setup():
+    """Phase 1: Entity Setup"""
+    st.markdown("## Phase 1: Entity Setup")
+    
+    with st.form("entity_setup"):
+        col1, col2 = st.columns(2)
         
         with col1:
-            self.components.create_metric_card(
-                title="Active Entities", 
-                value=len(self.session_manager.get_entities()),
-                icon="🏢",
-                help_text="Number of configured entities"
-            )
+            entity_name = st.text_input("Entity Name", value="Company A")
         
         with col2:
-            total_tranches = len(self.session_manager.get_tranches())
-            self.components.create_metric_card(
-                title="Total Tranches",
-                value=total_tranches,
-                icon="📊", 
-                help_text="Total option tranches configured"
-            )
+            loan_duration = st.number_input("Loan Duration (months)", min_value=1, max_value=120, value=12, step=1, key="entity_loan_duration")
         
-        with col3:
-            total_depth_entries = len(self.session_manager.get_quoting_depths())
-            self.components.create_metric_card(
-                title="Depth Entries",
-                value=total_depth_entries,
-                icon="💰",
-                help_text="Market depth data points"
-            )
-        
-        with col4:
-            current_phase = self.session_manager.get_current_phase()
-            phase_progress = (current_phase / 3.0) * 100
-            st.metric(
-                label="🚀 Progress",
-                value=f"{phase_progress:.0f}%",
-                help="Workflow completion progress"
-            )
-    
-    def run(self) -> None:
-        """Main application run method"""
-        try:
-            logger.info("Starting Options Pricing Calculator")
-            
-            # Setup page
-            self.setup_page_config()
-            self.display_header()
-            
-            # Display quick metrics
-            self.display_quick_metrics()
-            st.markdown("---")
-            
-            # Get base parameters from sidebar
-            params = self.sidebar_manager.create_sidebar()
-            logger.debug(f"Base parameters: {params}")
-            
-            # Add validation settings to sidebar
-            validation_settings = self.validation_handler.create_validation_sidebar()
-            params.update(validation_settings)
-            
-            # Display phase navigation
-            current_phase = self.session_manager.get_current_phase()
-            st.info(f"Current Phase: {current_phase}/3 - {['Entity Setup', 'Tranche Configuration', 'Depth Analysis'][current_phase-1]}")
-            
-            # Display quick validation status
-            st.info("🔍 Validation system ready")
-            
-            # Main content based on current phase
-            current_phase = self.session_manager.get_current_phase()
-            self.display_phase_content(current_phase, params)
-            
-            # Display footer
-            self.display_footer()
-            
-            logger.debug("Application run completed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error in main application: {e}")
-            st.error("An unexpected error occurred. Please check the logs.")
-    
-    def display_phase_content(self, phase: int, params: Dict[str, float]) -> None:
-        """Display content based on current phase"""
-        try:
-            if phase == 1:
-                self.display_phase_1(params)
-            elif phase == 2:
-                self.display_phase_2(params)
-            elif phase == 3:
-                self.display_phase_3(params)
-            else:
-                st.error(f"Invalid phase: {phase}")
-                
-        except Exception as e:
-            logger.error(f"Error displaying phase {phase} content: {e}")
-            st.error(f"Error displaying Phase {phase} content")
-    
-    @ui_handler
-    def display_phase_1(self, params: Dict[str, float]) -> None:
-        """Display Phase 1: Entity Setup with Professional UI"""
-        def phase_1_content():
-            # Professional entity setup form
-            entity_data = self.professional_forms.create_entity_form()
-            
-            if entity_data:
-                if self.session_manager.add_entity(entity_data):
-                    self.professional_components.create_validation_feedback(
-                        f"Entity '{entity_data['name']}' added successfully!", 
-                        "success"
-                    )
+        if st.form_submit_button("Add Entity", use_container_width=True):
+            if entity_name:
+                existing = next((e for e in st.session_state.entities_data if e['name'] == entity_name), None)
+                if existing:
+                    st.warning(f"Entity '{entity_name}' already exists!")
+                else:
+                    st.session_state.entities_data.append({
+                        'name': entity_name,
+                        'loan_duration': loan_duration
+                    })
+                    st.success(f"Added {entity_name}")
                     st.rerun()
-                else:
-                    self.professional_components.create_validation_feedback(
-                        "Failed to add entity. Please try again.", 
-                        "error"
-                    )
-            
-            # Display current entities
-            entities = self.session_manager.get_entities()
-            if entities:
-                entities_df = pd.DataFrame(entities)
-                st.dataframe(  # Replace with simple dataframe
-                    entities_df,
-                    "Current Entities",
-                    "🏢"
-                )
-        
-        # Phase 1 content displayed above
     
-    @ui_handler
-    def display_phase_2(self, params: Dict[str, float]) -> None:
-        """Display Phase 2: Tranche Setup with Professional UI"""
-        def phase_2_content():
-            if not self.session_manager.get_entities():
-                self.professional_components.create_status_indicator(
-                    "Setup Required",
-                    "Please complete Phase 1: Entity Setup first",
-                    "warning"
-                )
-                return
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                # Professional tranche form
-                entities = self.session_manager.get_entities()
-                tranche_data = self.professional_forms.create_tranche_form(entities)
-                
-                if tranche_data:
-                    if self.session_manager.add_tranche(tranche_data):
-                        self.professional_components.create_validation_feedback(
-                            f"Tranche for {tranche_data['entity']} added successfully!",
-                            "success"
-                        )
-                        st.rerun()
-                    else:
-                        self.professional_components.create_validation_feedback(
-                            "Failed to add tranche. Please try again.",
-                            "error"
-                        )
-            
-            with col2:
-                # Display current tranches
-                tranches = self.session_manager.get_tranches()
-                if tranches:
-                    tranches_df = pd.DataFrame(tranches)
-                    st.dataframe(  # Replace with simple dataframe
-                        tranches_df,
-                        "Current Tranches",
-                        "📊"
-                    )
+    # Display entities
+    if st.session_state.entities_data:
+        st.dataframe(pd.DataFrame(st.session_state.entities_data), use_container_width=True)
         
-        # Phase 2 content displayed above
+        if st.button("Continue to Phase 2", type="primary"):
+            st.session_state.current_phase = 2
+            st.rerun()
+
+def phase_2_tranche_setup():
+    """Phase 2: Tranche Setup"""
+    st.markdown("## Phase 2: Option Configuration")
     
-    @ui_handler 
-    def display_phase_3(self, params: Dict[str, float]) -> None:
-        """Display Phase 3: Quoting Depths and Calculations with Professional UI"""
-        def phase_3_content():
-            if not self.session_manager.get_tranches():
-                self.professional_components.create_status_indicator(
-                    "Setup Required",
-                    "Please complete Phase 2: Tranche Configuration first",
-                    "warning"
-                )
-                return
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                # Professional depth form
-                tranches = self.session_manager.get_tranches()
-                entities = list(set(tranche['entity'] for tranche in tranches))
-                exchanges = ["Binance", "OKX", "Coinbase", "Bybit", "KuCoin", "MEXC", "Gate", "Bitvavo", "Bitget", "Other"]
-                
-                depth_data = self.professional_forms.create_depth_form(entities, exchanges)
-                
-                if depth_data:
-                    if self.session_manager.add_quoting_depth(depth_data):
-                        self.professional_components.create_validation_feedback(
-                            f"Depth for {depth_data['entity']} on {depth_data['exchange']} added successfully!",
-                            "success"
-                        )
-                        st.rerun()
-                    else:
-                        self.professional_components.create_validation_feedback(
-                            "Failed to add quoting depth. Please try again.",
-                            "error"
-                        )
-            
-            with col2:
-                # Display current depths
-                depths = self.session_manager.get_quoting_depths()
-                if depths:
-                    depths_df = pd.DataFrame(depths)
-                    st.dataframe(  # Replace with simple dataframe
-                        depths_df,
-                        "Current Quoting Depths",
-                        "💰"
-                    )
-            
-            # Portfolio summary and calculations
-            self._display_portfolio_section(params)
-        
-        # Phase 3 content displayed above
+    if not st.session_state.entities_data:
+        st.warning("Add entities first!")
+        if st.button("Back to Phase 1"):
+            st.session_state.current_phase = 1
+            st.rerun()
+        return
     
-    def _display_portfolio_section(self, params: Dict[str, float]) -> None:
-        """Display professional portfolio section with calculations"""
-        try:
-            # Check if calculations can be performed
-            entities_with_depths = self.session_manager.get_entities_with_depths()
-            required_entities = self.session_manager.get_required_entities()
+    with st.form("tranche_setup"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            entity_names = [e['name'] for e in st.session_state.entities_data]
+            selected_entity = st.selectbox("Entity", entity_names)
+            option_type = st.selectbox("Option Type", ["call", "put"])
+        
+        with col2:
+            entity_info = next(e for e in st.session_state.entities_data if e['name'] == selected_entity)
+            loan_duration = entity_info['loan_duration']
             
-            if not required_entities.issubset(entities_with_depths):
-                missing_entities = required_entities - entities_with_depths
-                self.professional_components.create_status_indicator(
-                    "Incomplete Setup",
-                    f"Missing depth data for: {', '.join(missing_entities)}",
-                    "warning"
-                )
-                return
-            
-            # Validation dashboard
-            with st.expander("📊 Validation Dashboard", expanded=False):
-                st.info("✅ Validation Dashboard - All systems operational")
-            
-            # Calculate button with professional styling
-            if st.button("🚀 Calculate Portfolio Options", type="primary", use_container_width=True):
-                with st.spinner("Calculating portfolio options..."):
-                    try:
-                        results = self.calculation_orchestrator.perform_options_calculations(params)
-                        self.session_manager.set_calculation_results(results)
-                        
-                        # Show success message
-                        self.professional_components.create_validation_feedback(
-                            "Portfolio calculations completed successfully!",
-                            "success"
-                        )
-                        
-                        st.rerun()
-                        
-                    except Exception as e:
-                        self.professional_components.create_validation_feedback(
-                            f"Calculation failed: {str(e)}",
-                            "error"
-                        )
-            
-            # Display results if available
-            results = self.session_manager.get_calculation_results()
-            if results:
-                self._display_portfolio_results(results, params)
-                
-        except Exception as e:
-            logger.error(f"Error displaying portfolio section: {e}")
-            st.error("Error displaying portfolio section")
+            start_month = st.number_input("Start Month", min_value=0, max_value=loan_duration-1, value=0, key="tranche_start_month")
+            strike_price = st.number_input("Strike Price ($)", min_value=0.0001, value=12.0, step=0.0001, format="%.4f", key="tranche_strike_price")
+        
+        # Time calculation
+        time_to_expiration = (loan_duration - start_month) / 12.0
+        st.info(f"Time to expiration: {time_to_expiration:.2f} years ({loan_duration - start_month} months)")
+        
+        # Option valuation method
+        valuation_method = st.radio("Option Valuation Method", ["Token Valuation", "Premium from Current Price"], horizontal=True)
+        
+        if valuation_method == "Token Valuation":
+            token_valuation = st.number_input("Token Valuation ($)", min_value=0.01, value=10000.0, step=100.0, key="tranche_token_valuation")
+            premium_pct = None
+        else:
+            premium_pct = st.number_input("Premium from Current Price (%)", min_value=-50.0, max_value=200.0, value=20.0, step=1.0, key="tranche_premium_pct")
+            token_valuation = None
+        
+        if st.form_submit_button("Add Option", use_container_width=True):
+            st.session_state.tranches_data.append({
+                'entity': selected_entity,
+                'option_type': option_type,
+                'loan_duration': loan_duration,
+                'start_month': start_month,
+                'time_to_expiration': time_to_expiration,
+                'strike_price': strike_price,
+                'valuation_method': valuation_method,
+                'token_valuation': token_valuation,
+                'premium_pct': premium_pct
+            })
+            st.success(f"Added {option_type} option for {selected_entity}")
+            st.rerun()
     
-    def _display_portfolio_results(self, results: Dict[str, Any], params: Dict[str, float]) -> None:
-        """Display professional portfolio results"""
-        try:
-            # Portfolio overview
-            portfolio_data = {
-                'total_portfolio_value': results.get('total_portfolio_value', 0),
-                'active_entities': len(results.get('entities', [])),
-                'total_options': sum(len(entity.get('options', [])) for entity in results.get('entities', {}).values()),
-                'average_strike_price': results.get('average_strike_price', 0),
-                'portfolio_risk': results.get('portfolio_risk', 0),
-                'average_volatility': params.get('volatility', 0),
-                'average_time_to_expiration': results.get('average_time_to_expiration', 0),
-                'depth_coverage': results.get('depth_coverage', 0),
-                'entity_breakdown': results.get('entity_breakdown', {}),
-                'entities': results.get('entities', {}),
-                'options_details': results.get('options_details', [])
-            }
-            
-            self.portfolio_summary.create_portfolio_overview(portfolio_data)
-            
-            # Risk dashboard
-            if 'risk_metrics' in results:
-                self.portfolio_summary.create_risk_dashboard(results['risk_metrics'])
-            
-            # Performance dashboard
-            if 'performance_metrics' in results:
-                self.portfolio_summary.create_performance_dashboard(results['performance_metrics'])
-                
-        except Exception as e:
-            logger.error(f"Error displaying portfolio results: {e}")
-            st.error("Error displaying portfolio results")
+    # Display tranches
+    if st.session_state.tranches_data:
+        st.dataframe(pd.DataFrame(st.session_state.tranches_data), use_container_width=True)
+        
+        if st.button("Continue to Phase 3", type="primary"):
+            st.session_state.current_phase = 3
+            st.rerun()
+
+def phase_3_depth_analysis():
+    """Phase 3: Market Depth Analysis"""
+    st.markdown("## Phase 3: Market Depth Analysis")
     
-    def display_phase_2_tranche_setup(self, params: Dict[str, float]) -> None:
-        """Display Phase 2 tranche setup (legacy implementation for now)"""
-        st.markdown("## Phase 2: Tranche Configuration")
+    if not st.session_state.tranches_data:
+        st.warning("Configure options first!")
+        if st.button("Back to Phase 2"):
+            st.session_state.current_phase = 2
+            st.rerun()
+        return
+    
+    # Add depth data
+    with st.form("depth_setup"):
+        col1, col2 = st.columns(2)
         
-        if not self.session_manager.get_entities():
-            st.warning("No entities configured. Please go back to Phase 1.")
-            if st.button("Back to Phase 1"):
-                self.session_manager.set_current_phase(1)
-                st.rerun()
-            return
+        with col1:
+            entity_names = [e['name'] for e in st.session_state.entities_data]
+            entity = st.selectbox("Entity", entity_names)
+            exchange = st.selectbox("Exchange", ["Binance", "OKX", "Coinbase", "Other"])
         
-        st.markdown("### Add option tranches for your entities")
+        with col2:
+            spread = st.number_input("Bid-Ask Spread (bps)", value=10.0, key="depth_spread")
         
-        # Token Allocation Method (outside form for real-time updates)
-        st.markdown("**Token Allocation:**")
-        allocation_method = st.radio(
-            "Choose allocation method:",
-            ["Percentage of Total Tokens", "Absolute Token Count"],
-            horizontal=True,
-            key="allocation_method_selector"
-        )
+        col3, col4, col5 = st.columns(3)
+        with col3:
+            depth_50 = st.number_input("Depth @ 50bps ($)", value=100000.0, key="depth_50bps")
+        with col4:
+            depth_100 = st.number_input("Depth @ 100bps ($)", value=200000.0, key="depth_100bps")
+        with col5:
+            depth_200 = st.number_input("Depth @ 200bps ($)", value=300000.0, key="depth_200bps")
         
-        with st.form("add_tranche"):
-            # Entity Selection
-            col1, col2 = st.columns(2)
+        if st.form_submit_button("Add Depth Data"):
+            st.session_state.depths_data.append({
+                'entity': entity,
+                'exchange': exchange,
+                'spread': spread,
+                'depth_50': depth_50,
+                'depth_100': depth_100,
+                'depth_200': depth_200
+            })
+            st.success(f"Added depth data for {entity}")
+            st.rerun()
+    
+    # Display depth data
+    if st.session_state.depths_data:
+        st.dataframe(pd.DataFrame(st.session_state.depths_data), use_container_width=True)
+        
+        # Calculate effective depths
+        if st.button("Calculate Effective Depths"):
+            calc = CryptoEffectiveDepthCalculator()
+            results = []
+            entity_totals = {}
             
-            with col1:
-                entities = self.session_manager.get_entities()
-                entity_names = [e['name'] for e in entities]
-                selected_entity = st.selectbox("Select Entity", entity_names)
-                
-                # Get loan duration for selected entity
-                entity_info = next(e for e in entities if e['name'] == selected_entity)
-                loan_duration = entity_info['loan_duration']
-                st.info(f"**Loan Duration:** {loan_duration} months")
-            
-            with col2:
-                option_type = st.selectbox("Option Type", ["call", "put"])
-            
-            # Timing Configuration
-            col3, col4 = st.columns(2)
-            
-            with col3:
-                start_month = st.number_input(
-                    "Start Month of Pricing",
-                    min_value=0,
-                    max_value=loan_duration-1,
-                    value=0,
-                    step=1,
-                    help=f"Month when pricing starts (0 = immediately, max: {loan_duration-1})"
-                )
-            
-            with col4:
-                strike_price = st.number_input(
-                    "Strike Price ($)",
-                    min_value=0.0001,
-                    value=12.0000,
-                    step=0.0001,
-                    format="%.4f"
-                )
-            
-            # Token Allocation
-            col5, col6 = st.columns(2)
-            
-            if allocation_method == "Percentage of Total Tokens":
-                with col5:
-                    token_percentage = st.number_input(
-                        "Percentage of Tokens (%)",
-                        min_value=0.001,
-                        max_value=100.0,
-                        value=1.0,
-                        step=0.1,
-                        format="%.3f",
-                        help="Enter the percentage of total tokens for this tranche"
-                    )
-                with col6:
-                    st.info("Absolute token count will be calculated automatically")
-                    token_count = None
-            else:
-                with col5:
-                    token_count = st.number_input(
-                        "Number of Tokens",
-                        min_value=1,
-                        value=1000,
-                        step=100,
-                        help="Enter the exact number of tokens for this tranche"
-                    )
-                with col6:
-                    st.info("Percentage will be calculated automatically")
-                    token_percentage = None
-            
-            # Time calculations
-            time_to_expiration = (loan_duration - start_month) / 12.0
-            st.info(f"**Time to Expiration:** {time_to_expiration:.2f} years (from month {start_month} to {loan_duration})")
-            
-            if st.form_submit_button("Add Tranche", use_container_width=True):
-                # Validate tranche parameters before adding
-                validation_params = {
-                    'spot_price': 10.0,  # Default current price
-                    'strike_price': strike_price,
-                    'time_to_expiration': time_to_expiration,
-                    'risk_free_rate': 0.05,
-                    'volatility': 0.30,
-                    'option_type': option_type
-                }
-                
-                # Run validation
-                is_valid = validate_option_inputs_quick(
-                    spot=validation_params['spot_price'],
-                    strike=validation_params['strike_price'],
-                    time=validation_params['time_to_expiration'],
-                    rate=validation_params['risk_free_rate'],
-                    vol=validation_params['volatility'],
-                    option_type=validation_params['option_type'],
-                    show=True
+            for depth in st.session_state.depths_data:
+                result = calc.calculate_entity_effective_depth(
+                    depth_50bps=depth['depth_50'],
+                    depth_100bps=depth['depth_100'],
+                    depth_200bps=depth['depth_200'],
+                    bid_ask_spread=depth['spread'],
+                    volatility=0.25,
+                    exchange=depth['exchange']
                 )
                 
-                if is_valid:
-                    new_tranche = {
-                        'entity': selected_entity,
-                        'option_type': option_type,
-                        'loan_duration': loan_duration,
-                        'start_month': start_month,
-                        'time_to_expiration': time_to_expiration,
-                        'strike_price': strike_price,
-                        'allocation_method': allocation_method,
-                        'token_percentage': token_percentage,
-                        'token_count': token_count
+                results.append({
+                    'Entity': depth['entity'],
+                    'Exchange': depth['exchange'],
+                    'Raw Depth': f"${result['total_raw_depth']:,.0f}",
+                    'Effective Depth': f"${result['total_effective_depth']:,.0f}",
+                    'Efficiency': f"{result['overall_efficiency']:.1%}",
+                    'raw_depth_value': result['total_raw_depth'],
+                    'effective_depth_value': result['total_effective_depth']
+                })
+                
+                # Accumulate by entity
+                if depth['entity'] not in entity_totals:
+                    entity_totals[depth['entity']] = {
+                        'raw_depth': 0,
+                        'effective_depth': 0,
+                        'exchanges': []
                     }
-                    
-                    if self.session_manager.add_tranche(new_tranche):
-                        if allocation_method == "Percentage of Total Tokens":
-                            st.success(f"✅ Added validated {option_type} option for {selected_entity} ({token_percentage}% of tokens)")
-                        else:
-                            st.success(f"✅ Added validated {option_type} option for {selected_entity} ({token_count:,} tokens)")
-                        st.rerun()
-                    else:
-                        st.error("Failed to add tranche")
-                else:
-                    st.error("❌ Cannot add tranche - validation failed. Please fix the issues above.")
-    
-    def display_phase_3_quoting_depths(self, params: Dict[str, float]) -> None:
-        """Display Phase 3 quoting depths setup (legacy implementation for now)"""
-        st.markdown("## Phase 3: Quoting Depths")
-        
-        if not self.session_manager.get_tranches():
-            st.warning("No tranches configured. Please complete Phase 2 first.")
-            if st.button("Back to Phase 2"):
-                self.session_manager.set_current_phase(2)
-                st.rerun()
-            return
-        
-        st.markdown("### Configure exchange quoting depths for each entity")
-        st.info("Each entity must provide liquidity depth information across different exchanges.")
-        
-        # Get unique entities from tranches
-        tranches = self.session_manager.get_tranches()
-        entities = list(set(tranche['entity'] for tranche in tranches))
-        
-        # Predefined exchanges
-        exchanges = [
-            "Binance", "OKX", "Coinbase", "Bybit", "KuCoin", 
-            "MEXC", "Gate", "Bitvavo", "Bitget", "Other"
-        ]
-        
-        with st.form("quoting_depths_form"):
-            st.markdown("**Add Quoting Depth Entry**")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                selected_entity = st.selectbox("Select Entity", entities)
-            
-            with col2:
-                selected_exchange = st.selectbox("Exchange", exchanges)
-            
-            # Bid/Ask Spread
-            st.markdown("**Market Depth Information**")
-            col3, col4 = st.columns(2)
-            
-            with col3:
-                bid_ask_spread = st.number_input(
-                    "Bid/Ask Spread (bps)",
-                    min_value=0.0,
-                    max_value=1000.0,
-                    value=10.0,
-                    step=0.1,
-                    format="%.1f",
-                    help="Bid-ask spread in basis points"
-                )
-            
-            with col4:
-                # Get entity's loan value for percentage calculations
-                entities_data = self.session_manager.get_entities()
-                entity_info = next(e for e in entities_data if e['name'] == selected_entity)
-                entity_tranches = [t for t in tranches if t['entity'] == selected_entity]
                 
-                if entity_tranches:
-                    # Calculate total entity loan value (simplified)
-                    total_entity_value = sum(
-                        (t.get('token_percentage', 0) / 100.0 if t.get('token_percentage') else 
-                         (t.get('token_count', 0) / 100000.0)) * 1000000  # Rough estimate
-                        for t in entity_tranches
-                    )
-                    st.info(f"**Entity Loan Value:** ${total_entity_value:,.0f} (estimated)")
-                else:
-                    total_entity_value = 1000000  # Default fallback
-                    st.info("**Entity Loan Value:** Not calculated yet")
+                entity_totals[depth['entity']]['raw_depth'] += result['total_raw_depth']
+                entity_totals[depth['entity']]['effective_depth'] += result['total_effective_depth']
+                entity_totals[depth['entity']]['exchanges'].append(depth['exchange'])
             
-            # Depth input method selection
-            st.markdown("**Depth Quoting Method:**")
-            depth_method = st.radio(
-                "Choose depth input method:",
-                ["Absolute Values ($)", "Percentage of Loan Value (%)"],
-                horizontal=True,
-                key="depth_method_selector"
-            )
+            # Show individual exchange results
+            st.markdown("### Individual Exchange Results")
+            st.dataframe(pd.DataFrame([{k: v for k, v in r.items() if not k.endswith('_value')} for r in results]), use_container_width=True)
             
-            # Depth inputs based on method
-            st.markdown("**Liquidity Depths:**")
-            col5, col6, col7 = st.columns(3)
+            # Show cumulative results by entity
+            st.markdown("### Cumulative Effective Depths by Entity")
+            cumulative_results = []
+            total_raw = 0
+            total_effective = 0
             
-            if depth_method == "Absolute Values ($)":
-                with col5:
-                    depth_50bps = st.number_input(
-                        "Depth @ 50bps ($)",
-                        min_value=0.0,
-                        value=50000.0,
-                        step=1000.0,
-                        format="%.0f",
-                        help="Absolute liquidity depth at 50 basis points"
-                    )
-                    depth_50bps_pct = None
+            for entity, totals in entity_totals.items():
+                overall_efficiency = totals['effective_depth'] / totals['raw_depth'] if totals['raw_depth'] > 0 else 0
+                total_raw += totals['raw_depth']
+                total_effective += totals['effective_depth']
                 
-                with col6:
-                    depth_100bps = st.number_input(
-                        "Depth @ 100bps ($)",
-                        min_value=0.0,
-                        value=100000.0,
-                        step=1000.0,
-                        format="%.0f",
-                        help="Absolute liquidity depth at 100 basis points"
-                    )
-                    depth_100bps_pct = None
-                
-                with col7:
-                    depth_200bps = st.number_input(
-                        "Depth @ 200bps ($)",
-                        min_value=0.0,
-                        value=200000.0,
-                        step=1000.0,
-                        format="%.0f",
-                        help="Absolute liquidity depth at 200 basis points"
-                    )
-                    depth_200bps_pct = None
-            
-            else:  # Percentage method
-                with col5:
-                    depth_50bps_pct = st.number_input(
-                        "Depth @ 50bps (%)",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=5.0,
-                        step=0.1,
-                        format="%.1f",
-                        help="Liquidity depth as percentage of loan value"
-                    )
-                    depth_50bps = (depth_50bps_pct / 100.0) * total_entity_value
-                
-                with col6:
-                    depth_100bps_pct = st.number_input(
-                        "Depth @ 100bps (%)",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=10.0,
-                        step=0.1,
-                        format="%.1f",
-                        help="Liquidity depth as percentage of loan value"
-                    )
-                    depth_100bps = (depth_100bps_pct / 100.0) * total_entity_value
-                
-                with col7:
-                    depth_200bps_pct = st.number_input(
-                        "Depth @ 200bps (%)",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=20.0,
-                        step=0.1,
-                        format="%.1f",
-                        help="Liquidity depth as percentage of loan value"
-                    )
-                    depth_200bps = (depth_200bps_pct / 100.0) * total_entity_value
-            
-            # Show calculated values
-            if depth_method == "Percentage of Loan Value (%)":
-                st.info(f"**Calculated Depths:** 50bps: ${depth_50bps:,.0f}, 100bps: ${depth_100bps:,.0f}, 200bps: ${depth_200bps:,.0f}")
-            
-            if st.form_submit_button("Add Quoting Depth", use_container_width=True):
-                # Validate depth parameters before adding
-                is_valid = validate_depth_inputs_quick(
-                    spread_bps=bid_ask_spread,
-                    d50=depth_50bps,
-                    d100=depth_100bps,
-                    d200=depth_200bps,
-                    price=10.0,  # Default asset price
-                    exchange=selected_exchange,
-                    show=True
-                )
-                
-                if is_valid:
-                    # Check if this entity-exchange combination already exists
-                    existing_depths = self.session_manager.get_quoting_depths()
-                    existing_entry = next((
-                        entry for entry in existing_depths 
-                        if entry['entity'] == selected_entity and entry['exchange'] == selected_exchange
-                    ), None)
-                    
-                    if existing_entry:
-                        st.warning(f"Entry for {selected_entity} on {selected_exchange} already exists. Please delete the existing entry first.")
-                    else:
-                        new_entry = {
-                            'entity': selected_entity,
-                            'exchange': selected_exchange,
-                            'bid_ask_spread': bid_ask_spread,
-                            'depth_method': depth_method,
-                            'depth_50bps': depth_50bps,
-                            'depth_100bps': depth_100bps,
-                            'depth_200bps': depth_200bps,
-                            'depth_50bps_pct': depth_50bps_pct,
-                            'depth_100bps_pct': depth_100bps_pct,
-                            'depth_200bps_pct': depth_200bps_pct,
-                            'entity_loan_value': total_entity_value
-                        }
-                        
-                        if self.session_manager.add_quoting_depth(new_entry):
-                            st.success(f"✅ Added validated quoting depth for {selected_entity} on {selected_exchange}")
-                            st.rerun()
-                        else:
-                            st.error("Failed to add quoting depth")
-                else:
-                    st.error("❌ Cannot add quoting depth - validation failed. Please fix the issues above.")
-    
-    def display_calculations_section(self, params: Dict[str, float]) -> None:
-        """Display calculations and results section"""
-        try:
-            # Display depth value analysis
-            self.display_depth_value_analysis(params)
-            
-            # Options calculations
-            st.markdown("## Calculate Options")
-            
-            # Add validation dashboard
-            if st.button("🔍 Validate Portfolio", use_container_width=True):
-                st.markdown("### Portfolio Validation Results")
-                tranches = self.session_manager.get_tranches()
-                depths = self.session_manager.get_quoting_depths()
-                
-                # Run comprehensive portfolio validation
-                is_portfolio_valid = self.validator.validate_portfolio_consistency(
-                    tranches=tranches,
-                    depth_data=depths,
-                    global_params=params,
-                    show_results=True
-                )
-                
-                if is_portfolio_valid[0]:
-                    st.success("✅ Portfolio passed all validation checks")
-                else:
-                    st.warning("⚠️ Portfolio has validation issues - review before calculating")
-            
-            if st.button("Calculate All Options", type="primary", use_container_width=True):
-                # Pre-calculation validation gate
-                calculation_params = {
-                    'spot_price': params.get('spot_price', 10.0),
-                    'strike_price': 10.0,  # Will be validated per tranche
-                    'time_to_expiration': 1.0,  # Will be validated per tranche
-                    'risk_free_rate': params.get('risk_free_rate', 0.05),
-                    'volatility': params.get('volatility', 0.3)
-                }
-                
-                can_calculate = pre_calculation_check(calculation_params, "options")
-                
-                if can_calculate:
-                    with st.spinner("Calculating option values..."):
-                        try:
-                            results = self.calculation_orchestrator.perform_options_calculations(params)
-                            self.session_manager.set_calculation_results(results)
-                            st.success("✅ Calculations completed successfully!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Calculation failed: {str(e)}")
-                            logger.error(f"Options calculation error: {e}")
-                else:
-                    st.error("❌ Pre-calculation validation failed. Cannot proceed with calculations.")
-            
-            # Display results if available
-            self.display_results(params)
-            
-        except Exception as e:
-            ErrorHandler.handle_error(e, "Calculations Section")
-    
-    def display_depth_value_analysis(self, params: Dict[str, float]) -> None:
-        """Display depth value analysis (legacy implementation for now)"""
-        try:
-            analysis = self.calculation_orchestrator.calculate_depth_value_analysis(params)
-            
-            if not analysis:
-                return
-            
-            # Display advanced market maker valuation first
-            if analysis.get('advanced_valuation'):
-                self.display_advanced_mm_valuation(analysis['advanced_valuation'])
-                st.markdown("---")
-            
-            st.markdown("## Crypto-Optimized Depth Value Analysis")
-            st.markdown("*Advanced effective depth calculation using empirically-tuned crypto market factors*")
-            
-            st.info("🚀 **Now Using:** Crypto-empirical depth calculation with exchange tiers, volatility optimization, spread bonuses, liquidity bonuses, MEV adjustments, and cascade protection!")
-            
-            # Overall metrics
-            overall = analysis['overall_metrics']
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "Total Quoted Value",
-                    f"${overall['total_quoted_value']:,.0f}",
-                    help="Sum of all liquidity depths across entities and exchanges"
-                )
-            
-            with col2:
-                st.metric(
-                    "Effective Value",
-                    f"${overall['total_effective_value']:,.0f}",
-                    help="Adjusted value considering volatility and depth tier drop-offs"
-                )
-            
-            with col3:
-                efficiency_pct = overall['overall_efficiency'] * 100
-                st.metric(
-                    "Overall Efficiency",
-                    f"{efficiency_pct:.1f}%",
-                    help="Ratio of effective value to quoted value"
-                )
-            
-            with col4:
-                vol_adj_pct = overall['volatility_adjustment'] * 100
-                st.metric(
-                    "Volatility Adjustment",
-                    f"{vol_adj_pct:.1f}%",
-                    help="Value reduction due to asset volatility"
-                )
-            
-            # Entity-level analysis
-            st.markdown("### Entity Analysis")
-            
-            entity_summary = []
-            for entity_name, entity_data in analysis['entity_analyses'].items():
-                efficiency = (entity_data['effective_quoted_value'] / entity_data['total_quoted_value'] 
-                             if entity_data['total_quoted_value'] > 0 else 0)
-                
-                entity_summary.append({
-                    'Entity': entity_name,
-                    'Exchanges': len(entity_data['exchanges']),
-                    'Total Quoted ($)': f"${entity_data['total_quoted_value']:,.0f}",
-                    'Effective Value ($)': f"${entity_data['effective_quoted_value']:,.0f}",
-                    'Efficiency (%)': f"{efficiency*100:.1f}%",
-                    'Depth @ 50bps ($)': f"${entity_data['depth_distribution']['50bps']:,.0f}",
-                    'Depth @ 100bps ($)': f"${entity_data['depth_distribution']['100bps']:,.0f}",
-                    'Depth @ 200bps ($)': f"${entity_data['depth_distribution']['200bps']:,.0f}"
+                cumulative_results.append({
+                    'Entity': entity,
+                    'Exchanges': ', '.join(set(totals['exchanges'])),
+                    'Total Raw Depth': f"${totals['raw_depth']:,.0f}",
+                    'Total Effective Depth': f"${totals['effective_depth']:,.0f}",
+                    'Overall Efficiency': f"{overall_efficiency:.1%}"
                 })
             
-            st.dataframe(pd.DataFrame(entity_summary), use_container_width=True)
+            # Add grand total row
+            grand_efficiency = total_effective / total_raw if total_raw > 0 else 0
+            cumulative_results.append({
+                'Entity': '**TOTAL**',
+                'Exchanges': 'All',
+                'Total Raw Depth': f"**${total_raw:,.0f}**",
+                'Total Effective Depth': f"**${total_effective:,.0f}**",
+                'Overall Efficiency': f"**{grand_efficiency:.1%}**"
+            })
             
-            # Add depth-to-options ratio visualization if option calculations exist
-            if self.session_manager.get_calculation_results():
-                st.markdown("---")
-                ratio_data = self.calculation_orchestrator.calculate_depth_options_ratio(params)
-                if ratio_data:
-                    self.display_depth_options_graph(ratio_data)
+            st.dataframe(pd.DataFrame(cumulative_results), use_container_width=True)
+        
+        # Market Maker Valuation
+        if st.button("Run Market Maker Valuation"):
+            try:
+                models = DepthValuationModels()
+                trade_sizes, probabilities = generate_trade_size_distribution()
+                
+                params = st.session_state.params
+                params['token_price'] = params['total_valuation'] / params['total_tokens'] if params['total_tokens'] > 0 else 0
+                
+                # Calculate MM valuation for each entity with depth data
+                all_results = []
+                entity_mm_totals = {}
+                total_mm_value = 0
+                
+                for depth in st.session_state.depths_data:
+                    # Use actual depth data for calculations
+                    depth_0 = depth['depth_50'] + depth['depth_100'] + depth['depth_200']
+                    spread_0 = depth['spread'] / 10000  # Convert bps to decimal
+                    spread_1 = spread_0 * 0.5  # Assume MM reduces spread by 50%
                     
-                    # Summary table for depth/options ratios
-                    st.markdown("### Depth-to-Options Ratio Summary")
-                    ratio_summary = []
-                    for entity, data in ratio_data.items():
-                        ratio_summary.append({
-                            'Entity': entity,
-                            'Option Value': f"${data['option_value']:,.0f}",
-                            'Total Depth': f"${data['total_depth_value']:,.0f}",
-                            'Effective Depth': f"${data['effective_depth_value']:,.0f}",
-                            'Market Maker Value': f"${data['market_maker_value']:,.0f}",
-                            'Depth/Option Ratio': f"{data['depth_to_option_ratio']:.2f}x",
-                            'Effective Ratio': f"{data['effective_depth_to_option_ratio']:.2f}x",
-                            'MM/Option Ratio': f"{data['mm_to_option_ratio']:.2f}x",
-                            'Depth Coverage %': f"{data['depth_coverage_percentage']:.0f}%",
-                            'Effective Coverage %': f"{data['effective_coverage_percentage']:.0f}%",
-                            'MM Coverage %': f"{data['mm_coverage_percentage']:.0f}%"
-                        })
-                    st.dataframe(pd.DataFrame(ratio_summary), use_container_width=True)
-            
-        except Exception as e:
-            ErrorHandler.handle_error(e, "Depth Value Analysis")
-    
-    # Include remaining legacy implementations for now (to be modularized later)
-    def display_tranches_table(self):
-        """Display tranches table (legacy implementation)"""
-        # This would be extracted to ui.tranche_table module
-        tranches = self.session_manager.get_tranches()
-        if tranches:
-            st.markdown("## Current Tranches")
-            df = pd.DataFrame(tranches)
-            st.dataframe(df, use_container_width=True)
-    
-    def display_quoting_depths_table(self):
-        """Display quoting depths table (legacy implementation)"""
-        # This would be extracted to ui.depths_table module
-        depths = self.session_manager.get_quoting_depths()
-        if depths:
-            st.markdown("### Current Quoting Depths")
-            df = pd.DataFrame(depths)
-            st.dataframe(df, use_container_width=True)
-    
-    def display_advanced_mm_valuation(self, advanced_valuation):
-        """Display advanced MM valuation (legacy implementation)"""
-        # This would be extracted to ui.results_display module
-        if not advanced_valuation or not advanced_valuation['entity_valuations']:
-            return
-        
-        st.markdown("## Advanced Market Maker Valuation")
-        st.markdown("*Multi-model approach based on Almgren-Chriss, Kyle's Lambda, Bouchaud Power Law, and Amihud frameworks*")
-        
-        # Display summary metrics
-        total_mm_value = sum(entity_data['total_mm_value'] for entity_data in advanced_valuation['entity_valuations'].values())
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total MM Value Generated", f"${total_mm_value:,.0f}")
-        with col2:
-            num_entities = len(advanced_valuation['entity_valuations'])
-            avg_value_per_entity = total_mm_value / num_entities if num_entities > 0 else 0
-            st.metric("Average Value per Entity", f"${avg_value_per_entity:,.0f}")
-        with col3:
-            volatility = advanced_valuation['parameters_used']['volatility']
-            st.metric("Market Volatility", f"{volatility:.1%}")
-    
-    def display_depth_options_graph(self, ratio_data):
-        """Display depth options graph (legacy implementation)"""
-        # This would be extracted to ui.visualization module
-        if not ratio_data:
-            return
-        
-        st.markdown("### Depth-to-Options Value Analysis")
-        
-        # Simple visualization for now
-        entities = list(ratio_data.keys())
-        ratios = [ratio_data[entity]['effective_depth_to_option_ratio'] for entity in entities]
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.bar(entities, ratios)
-        ax.set_xlabel('Entities')
-        ax.set_ylabel('Effective Depth-to-Option Ratio')
-        ax.set_title('Depth Coverage Ratio per Entity')
-        ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='1:1 Coverage Line')
-        
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
-    
-# Removed unused validation status widget function
-    
-    def display_results(self, params):
-        """Display calculation results (legacy implementation)"""
-        # This would be extracted to ui.results_display module
-        results = self.session_manager.get_calculation_results()
-        if not results:
-            return
-        
-        st.markdown("## Results")
-        
-        # Portfolio Summary
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "Total Portfolio Value",
-                f"${results['total_portfolio_value']:,.0f}"
-            )
-        
-        with col2:
-            portfolio_percentage = (results['total_portfolio_value'] / params['total_valuation']) * 100
-            st.metric(
-                "Portfolio as % of Total Valuation",
-                f"{portfolio_percentage:.2f}%"
-            )
-        
-        with col3:
-            st.metric(
-                "Number of Entities",
-                len(results['entities'])
-            )
+                    result = models.composite_valuation(
+                        spread_0=spread_0, spread_1=spread_1, 
+                        volatility=params['volatility'],
+                        trade_sizes=trade_sizes[:10], 
+                        probabilities=probabilities[:10],
+                        volume_0=1000000, volume_mm=500000,
+                        depth_0=depth_0, depth_mm=depth_0 * 0.5,  # MM adds 50% more depth
+                        daily_volume_0=1000000, daily_volume_mm=500000,
+                        asset_price=params['token_price'], 
+                        use_crypto_weights=True
+                    )
+                    
+                    result['entity'] = depth['entity']
+                    result['exchange'] = depth['exchange']
+                    all_results.append(result)
+                    total_mm_value += result['total_value']
+                    
+                    # Accumulate by entity
+                    if depth['entity'] not in entity_mm_totals:
+                        entity_mm_totals[depth['entity']] = {
+                            'total_value': 0,
+                            'exchanges': [],
+                            'exchange_values': []
+                        }
+                    
+                    entity_mm_totals[depth['entity']]['total_value'] += result['total_value']
+                    entity_mm_totals[depth['entity']]['exchanges'].append(depth['exchange'])
+                    entity_mm_totals[depth['entity']]['exchange_values'].append(f"{depth['exchange']}: ${result['total_value']:.2f}")
+                
+                st.success(f"Total Market Maker Value: ${total_mm_value:,.2f}")
+                st.info(f"Raw model output (now properly calibrated): ${total_mm_value:.2f}")
+                
+                # Calculate efficiency scores (need to get option values for each entity)
+                entity_option_values = {}
+                for tranche in st.session_state.tranches_data:
+                    try:
+                        entity = tranche['entity']
+                        
+                        # Calculate option value using global parameters
+                        K = tranche['strike_price']
+                        T = tranche['time_to_expiration']
+                        r = params['risk_free_rate']
+                        sigma = params['volatility']
+                        
+                        # Calculate spot price based on valuation method
+                        if tranche['valuation_method'] == "Token Valuation":
+                            # Use token valuation directly - assume 1 token per option for simplicity
+                            total_option_value = tranche['token_valuation']
+                            # Calculate implied spot price
+                            S = K  # Start with ATM assumption for spot price calculation
+                        else:
+                            # Premium from current price - need to calculate spot price from current market
+                            # For now, use strike as base and apply premium
+                            S = K * (1 + tranche['premium_pct'] / 100.0)
+                            
+                            # Validate inputs before calling Black-Scholes
+                            if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+                                st.warning(f"Invalid parameters for {entity}: S={S:.4f}, K={K:.4f}, T={T:.4f}, σ={sigma:.4f}")
+                                continue
+                            
+                            if tranche['option_type'] == 'call':
+                                option_price = black_scholes_call(S, K, T, r, sigma)
+                            else:
+                                option_price = black_scholes_put(S, K, T, r, sigma)
+                            
+                            # For premium method, assume 1 token per option
+                            total_option_value = option_price
+                        
+                        if entity not in entity_option_values:
+                            entity_option_values[entity] = 0
+                        entity_option_values[entity] += total_option_value
+                        
+                    except Exception as e:
+                        st.error(f"Error calculating option value for {entity}: {e}")
+                        continue
+                
+                # Get effective depths per entity (from earlier calculation)
+                entity_effective_depths = {}
+                if 'depths_data' in st.session_state and st.session_state.depths_data:
+                    calc = CryptoEffectiveDepthCalculator()
+                    for depth in st.session_state.depths_data:
+                        result = calc.calculate_entity_effective_depth(
+                            depth_50bps=depth['depth_50'],
+                            depth_100bps=depth['depth_100'],
+                            depth_200bps=depth['depth_200'],
+                            bid_ask_spread=depth['spread'],
+                            volatility=0.25,
+                            exchange=depth['exchange']
+                        )
+                        
+                        entity = depth['entity']
+                        if entity not in entity_effective_depths:
+                            entity_effective_depths[entity] = 0
+                        entity_effective_depths[entity] += result['total_effective_depth']
+                
+                # Show breakdown by entity (grouped by exchanges)
+                st.markdown("### Market Maker Value by Entity")
+                entity_summary = []
+                for entity, totals in entity_mm_totals.items():
+                    # Calculate meaningful MM metrics
+                    option_value = entity_option_values.get(entity, 1)  # Avoid division by zero
+                    effective_depth = entity_effective_depths.get(entity, 0)
+                    mm_value = totals['total_value']
+                    
+                    # 1. MM Efficiency: How much MM value per $ of option exposure (as percentage)
+                    mm_efficiency = (mm_value / option_value * 100) if option_value > 0 else 0
+                    
+                    # 2. Depth Coverage: How many times can effective depth cover option value
+                    depth_coverage = (effective_depth / option_value) if option_value > 0 else 0
+                    
+                    # 3. Risk Score: 1-4 scale where 1 = lowest risk, 4 = highest risk
+                    if depth_coverage >= 10:
+                        risk_score = 1
+                    elif depth_coverage >= 5:
+                        risk_score = 2
+                    elif depth_coverage >= 2:
+                        risk_score = 3
+                    else:
+                        risk_score = 4
+                    
+                    # Use the properly calibrated MM values directly (no additional scaling needed)
+                    entity_summary.append({
+                        'Entity': entity,
+                        'Exchanges': ', '.join(set(totals['exchanges'])),
+                        'Exchange Breakdown': ' | '.join(totals['exchange_values']),
+                        'MM Value': f"${mm_value:,.2f}",
+                        'Option Value': f"${option_value:,.2f}",
+                        'MM Efficiency': f"{mm_efficiency:.1f}%",
+                        'Effective Depth': f"${effective_depth:,.0f}",
+                        'Depth Coverage': f"{depth_coverage:.1f}x",
+                        'Risk Score': risk_score
+                    })
+                
+                st.dataframe(pd.DataFrame(entity_summary), use_container_width=True)
+                
+                # Add explanation
+                st.info("""
+                **MM Efficiency**: Market maker value as % of option value (higher = better returns)  
+                **Depth Coverage**: How many times effective depth covers option value (higher = lower risk)  
+                **Risk Score**: 1 = Low Risk (≥10x coverage), 2 = Medium Risk (5-10x), 3 = High Risk (2-5x), 4 = Very High Risk (<2x)
+                """)
+                
+                # Add Charts
+                st.markdown("### Visual Analytics")
+                
+                # Chart 1: Market Maker Value by Entity (Bar Chart)
+                if entity_summary:
+                    try:
+                        fig, ax = plt.subplots(figsize=(12, 6))
+                        
+                        entities = [row['Entity'] for row in entity_summary]
+                        mm_values = [float(row['MM Value'].replace('$', '').replace(',', '')) for row in entity_summary]
+                        
+                        bars = ax.bar(entities, mm_values, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'][:len(entities)])
+                        
+                        # Add value labels on bars
+                        for i, (bar, value) in enumerate(zip(bars, mm_values)):
+                            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(mm_values)*0.01,
+                                   f'${value:,.0f}', ha='center', va='bottom', fontweight='bold')
+                        
+                        ax.set_title('Market Maker Value by Entity', fontweight='bold', fontsize=14)
+                        ax.set_xlabel('Entities', fontweight='bold')
+                        ax.set_ylabel('Market Maker Value ($)', fontweight='bold')
+                        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+                        ax.grid(axis='y', alpha=0.3)
+                        
+                        plt.xticks(rotation=45)
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                        plt.close()
+                    except Exception as e:
+                        st.error(f"Error creating MM Value chart: {e}")
+                        st.write("Debug - entity_summary:", entity_summary)
+                
+                # Chart 2: MM Efficiency Comparison
+                if entity_summary:
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    
+                    entities = [row['Entity'] for row in entity_summary]
+                    mm_efficiencies = [float(row['MM Efficiency'].replace('%', '')) for row in entity_summary]
+                    
+                    bars = ax.bar(entities, mm_efficiencies, color=['#2ca02c', '#ff7f0e', '#1f77b4', '#d62728', '#9467bd'][:len(entities)])
+                    
+                    # Add value labels on bars
+                    for i, (bar, eff) in enumerate(zip(bars, mm_efficiencies)):
+                        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(mm_efficiencies)*0.01,
+                               f'{eff:.1f}%', ha='center', va='bottom', fontweight='bold')
+                    
+                    ax.set_title('MM Efficiency by Entity\n(Market Maker Value as % of Option Value)', fontweight='bold', fontsize=14)
+                    ax.set_xlabel('Entities', fontweight='bold')
+                    ax.set_ylabel('MM Efficiency (%)', fontweight='bold')
+                    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}%'))
+                    ax.grid(axis='y', alpha=0.3)
+                    
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close()
+                
+                
+            except Exception as e:
+                st.error(f"Error: {e}")
 
+def display_phase_navigation():
+    """Display phase navigation"""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("Phase 1: Entities", use_container_width=True):
+            st.session_state.current_phase = 1
+            st.rerun()
+    
+    with col2:
+        if st.button("Phase 2: Options", use_container_width=True):
+            st.session_state.current_phase = 2
+            st.rerun()
+    
+    with col3:
+        if st.button("Phase 3: Depth Analysis", use_container_width=True):
+            st.session_state.current_phase = 3
+            st.rerun()
+    
+    # Phase indicator
+    phases = ["Entity Setup", "Option Configuration", "Market Depth Analysis"]
+    st.info(f"**Phase {st.session_state.current_phase}/3:** {phases[st.session_state.current_phase-1]}")
+    st.markdown("---")
 
 def main():
-    """Main application entry point"""
-    try:
-        app = ModularOptionsApp()
-        app.run()
-        
-    except Exception as e:
-        logger.critical(f"Critical error in main application: {e}")
-        st.error("A critical error occurred. Please restart the application.")
-
+    """Main application"""
+    initialize_session_state()
+    
+    # Header
+    st.markdown('<h1 class="main-header">Options Pricing Calculator</h1>', unsafe_allow_html=True)
+    
+    # Get parameters from sidebar
+    params = create_sidebar()
+    
+    # Phase navigation
+    display_phase_navigation()
+    
+    # Main content
+    if st.session_state.current_phase == 1:
+        phase_1_entity_setup()
+    elif st.session_state.current_phase == 2:
+        phase_2_tranche_setup()
+    else:
+        phase_3_depth_analysis()
 
 if __name__ == "__main__":
     main()

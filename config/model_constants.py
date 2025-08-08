@@ -13,28 +13,28 @@ from typing import Dict
 @dataclass
 class AlmgrenChrissConfig:
     """Almgren-Chriss market impact model parameters"""
-    ALPHA_DEFAULT: float = 0.1          # Market impact coefficient
-    ALPHA_MIN: float = 0.01             # Minimum reasonable alpha
-    ALPHA_MAX: float = 1.0              # Maximum reasonable alpha
+    ALPHA_DEFAULT: float = 50.0         # Market impact coefficient (calibrated for crypto MM value)
+    ALPHA_MIN: float = 10.0             # Minimum reasonable alpha
+    ALPHA_MAX: float = 200.0            # Maximum reasonable alpha (higher for illiquid markets)
     VOLATILITY_SCALING: float = 1.0     # Volatility scaling factor
 
 
 @dataclass
 class KyleLambdaConfig:
     """Kyle's Lambda model parameters"""
-    LAMBDA_BASE: float = 0.001          # Base lambda value
-    DEPTH_DIVISOR: float = 2.0          # Lambda = 1/(2*Depth)
-    MIN_DEPTH: float = 1000.0           # Minimum depth for calculations
-    PRICE_SCALING: float = 10.0         # Default asset price for scaling
+    LAMBDA_BASE: float = 0.5            # Base lambda value (50 bps impact when trade = depth)
+    DEPTH_DIVISOR: float = 1.0          # Direct scaling (not 1/2)
+    MIN_DEPTH: float = 10000.0          # Minimum depth for calculations ($10K)
+    PRICE_SCALING: float = 1.0          # No artificial price scaling needed
 
 
 @dataclass
 class BouchaudConfig:
     """Bouchaud Power Law model parameters"""
-    DELTA_DEFAULT: float = 0.6          # Power law exponent
-    DELTA_MIN: float = 0.1              # Minimum delta
-    DELTA_MAX: float = 1.0              # Maximum delta
-    Y_COEFFICIENT: float = 1.0          # Bouchaud Y coefficient
+    DELTA_DEFAULT: float = 0.5          # Power law exponent (square root law)
+    DELTA_MIN: float = 0.3              # Minimum delta
+    DELTA_MAX: float = 0.7              # Maximum delta
+    Y_COEFFICIENT: float = 100.0        # Bouchaud Y coefficient (scaled for MM value generation)
     VOLUME_SCALING: float = 1.0         # Volume normalization factor
 
 
@@ -50,37 +50,37 @@ class AmihudConfig:
 class HawkesCascadeConfig:
     """Hawkes Process/Cascade model parameters"""
     BETA_DECAY: float = 2.0             # Hawkes process decay rate
-    MU_BASE_INTENSITY: float = 0.1      # Base intensity parameter
+    MU_BASE_INTENSITY: float = 0.5      # Base intensity parameter (increased for realistic values)
     VOLATILITY_MULTIPLIER: float = 2.0  # Volume spike factor multiplier
     
-    # Scaling factors (adjusted from original overly aggressive values)
-    LIQUIDATION_SCALE: float = 0.01     # Liquidation protection scaling
-    LIQUIDATION_FRACTION: float = 0.001 # Fraction of daily volume affected
-    CASCADE_SCALE: float = 0.01         # Cascade value scaling
-    SOCIAL_SCALE: float = 0.05          # Social momentum factor
-    SOCIAL_FRACTION: float = 0.001      # Social dampening scaling
+    # Scaling factors (calibrated for $50K-$500K outputs)
+    LIQUIDATION_SCALE: float = 0.5      # Liquidation protection scaling (50% of risk volume)
+    LIQUIDATION_FRACTION: float = 0.02  # Fraction of daily volume affected (2% cascade risk)
+    CASCADE_SCALE: float = 0.1          # Cascade value scaling (10% of affected volume)
+    SOCIAL_SCALE: float = 1.0           # Social momentum factor
+    SOCIAL_FRACTION: float = 0.01       # Social dampening scaling (1% of volume)
 
 
 @dataclass
 class ResilienceConfig:
     """Order Book Resilience/Recovery model parameters"""
-    RHO_RECOVERY_BASE: float = 0.3      # Base recovery rate
+    RHO_RECOVERY_BASE: float = 0.5      # Base recovery rate (faster in crypto)
     TIME_HORIZON_HOURS: float = 24.0    # Default analysis time horizon
     RECOVERY_DENOMINATOR: float = 100000.0  # Recovery rate calculation base
     
-    # Scaling factors (improved from original)
-    RECOVERY_VOLUME_FRACTION: float = 0.1     # Volume fraction for recovery
-    RECOVERY_SCALE: float = 0.001             # Recovery value scaling
-    PERMANENT_VOLUME_FRACTION: float = 0.2    # Permanent impact volume fraction
-    PERMANENT_IMPACT_FRACTION: float = 0.3    # Fraction that becomes permanent
-    PERMANENT_SCALE: float = 0.0001           # Permanent value scaling
+    # Scaling factors (calibrated for realistic outputs)
+    RECOVERY_VOLUME_FRACTION: float = 0.1     # Volume fraction for recovery (10%)
+    RECOVERY_SCALE: float = 1.0               # No artificial scaling needed
+    PERMANENT_VOLUME_FRACTION: float = 0.05   # Permanent impact volume fraction (5%)
+    PERMANENT_IMPACT_FRACTION: float = 0.3    # Fraction that becomes permanent (30%)
+    PERMANENT_SCALE: float = 1.0              # No artificial scaling needed
 
 
 @dataclass
 class PINConfig:
     """Adverse Selection/PIN model parameters"""
-    ALPHA_INFORMED: float = 0.2         # Informed trader arrival rate
-    MU_INFO_EVENT: float = 0.1          # Information event rate
+    ALPHA_INFORMED: float = 0.3         # Informed trader arrival rate (higher in crypto)
+    MU_INFO_EVENT: float = 0.2          # Information event rate (more frequent in crypto)
     EPSILON_BUY: float = 0.3            # Uninformed buy rate
     EPSILON_SELL: float = 0.3           # Uninformed sell rate
     
@@ -90,20 +90,20 @@ class PINConfig:
     BENIGN_LOSS_RATE: float = 0.3            # Opportunity cost on benign flow
     
     # Final scaling
-    VOLUME_SCALE: float = 0.00001            # Scale by daily volume
+    VOLUME_SCALE: float = 0.1                 # MM captures 10% of adverse selection value
 
 
 @dataclass
 class CrossVenueConfig:
     """Cross-Venue Arbitrage model parameters"""
-    ARB_EFFICIENCY_BETA: float = 0.5    # Arbitrage efficiency factor
+    ARB_EFFICIENCY_BETA: float = 0.7    # Arbitrage efficiency factor (higher in crypto)
     MAX_IMPACT_REDUCTION: float = 0.5   # Maximum 50% impact reduction
     MM_IMPACT_REDUCTION: float = 0.7    # Higher reduction with MM
     
     # Value components
-    ARB_VALUE_SCALE: float = 0.0001     # Arbitrage value scaling
-    DISCOVERY_VOLUME_FRACTION: float = 0.1   # Price discovery volume fraction
-    DISCOVERY_SCALE: float = 0.001      # Discovery value scaling
+    ARB_VALUE_SCALE: float = 0.1        # Arbitrageurs trade 10% of volume
+    DISCOVERY_VOLUME_FRACTION: float = 0.05  # Price discovery volume fraction (5%)
+    DISCOVERY_SCALE: float = 1.0        # No artificial scaling needed
 
 
 @dataclass
