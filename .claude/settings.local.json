@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(streamlit run:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:claude.ai)"
+    ],
+    "deny": []
+  }
+}
