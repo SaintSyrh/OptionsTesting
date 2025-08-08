@@ -2,6 +2,15 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 import math
+from config.model_constants import (
+    ALMGREN_CHRISS, KYLE_LAMBDA, BOUCHAUD, AMIHUD, 
+    HAWKES_CASCADE, RESILIENCE, PIN, CROSS_VENUE, MODEL_WEIGHTS
+)
+import logging
+
+from utils.comprehensive_validation import validate_depth_inputs_quick
+
+logger = logging.getLogger(__name__)
 
 class DepthValuationModels:
     """
@@ -9,21 +18,21 @@ class DepthValuationModels:
     """
     
     def __init__(self):
-        # Model parameters (can be calibrated based on market data)
+        # Model parameters loaded from configuration constants
         self.default_params = {
-            'alpha': 0.1,           # Market impact coefficient (Almgren-Chriss)
-            'lambda_0': 0.001,      # Base Kyle's lambda
-            'delta': 0.6,           # Bouchaud power law exponent
-            'Y': 1.0,               # Bouchaud coefficient
-            'rho': 0.5,             # Order book resilience rate
-            'beta_hawkes': 2.0,     # Hawkes process decay
-            'mu_hawkes': 0.1,       # Hawkes base intensity
-            'rho_recovery': 0.3,    # Recovery rate parameter (resilience model)
-            'pin_alpha': 0.2,       # Informed trader arrival rate (PIN model)
-            'pin_mu': 0.1,          # Information event rate (PIN model)
-            'epsilon_buy': 0.3,     # Uninformed buy rate (PIN model)
-            'epsilon_sell': 0.3,    # Uninformed sell rate (PIN model)
-            'arb_beta': 0.5,        # Cross-venue arbitrage efficiency
+            'alpha': ALMGREN_CHRISS.ALPHA_DEFAULT,
+            'lambda_0': KYLE_LAMBDA.LAMBDA_BASE,
+            'delta': BOUCHAUD.DELTA_DEFAULT,
+            'Y': BOUCHAUD.Y_COEFFICIENT,
+            'rho': RESILIENCE.RHO_RECOVERY_BASE,
+            'beta_hawkes': HAWKES_CASCADE.BETA_DECAY,
+            'mu_hawkes': HAWKES_CASCADE.MU_BASE_INTENSITY,
+            'rho_recovery': RESILIENCE.RHO_RECOVERY_BASE,
+            'pin_alpha': PIN.ALPHA_INFORMED,
+            'pin_mu': PIN.MU_INFO_EVENT,
+            'epsilon_buy': PIN.EPSILON_BUY,
+            'epsilon_sell': PIN.EPSILON_SELL,
+            'arb_beta': CROSS_VENUE.ARB_EFFICIENCY_BETA,
         }
     
     def almgren_chriss_value(self, 
@@ -34,14 +43,75 @@ class DepthValuationModels:
                            probabilities: List[float],
                            volume_0: float,
                            volume_mm: float,
-                           alpha: Optional[float] = None) -> Dict:
+                           alpha: Optional[float] = None,
+                           validate_inputs: bool = True) -> Dict:
         """
-        Almgren-Chriss adapted model for market maker value
+        Almgren-Chriss adapted model for market maker value with comprehensive validation
         
         Value_MM = Σᵢ Qᵢ * P(Qᵢ) * [(Spread₀ - Spread₁) + α * σ * (√(Qᵢ/V₀) - √(Qᵢ/(V₀ + V_MM)))]
+        
+        Args:
+            spread_0: Original spread (bps)
+            spread_1: New spread with MM (bps)
+            volatility: Asset volatility (annualized)
+            trade_sizes: List of possible trade sizes
+            probabilities: Corresponding probabilities for each trade size
+            volume_0: Original trading volume
+            volume_mm: Market maker volume contribution
+            alpha: Market impact coefficient (optional)
+            validate_inputs: Whether to validate inputs
         """
         if alpha is None:
             alpha = self.default_params['alpha']
+        
+        # Input validation
+        if validate_inputs:
+            try:
+                # Validate basic parameters
+                if spread_0 < 0 or spread_1 < 0:
+                    raise ValueError("Spreads cannot be negative")
+                
+                if volatility < 0:
+                    raise ValueError("Volatility cannot be negative")
+                
+                if volume_0 < 0 or volume_mm < 0:
+                    raise ValueError("Volumes cannot be negative")
+                
+                if not (0 <= alpha <= 10):
+                    logger.warning(f"Alpha {alpha:.3f} outside typical range [0, 10]")
+                
+                # Validate trade sizes and probabilities
+                if len(trade_sizes) != len(probabilities):
+                    raise ValueError("Trade sizes and probabilities must have same length")
+                
+                if any(p < 0 for p in probabilities):
+                    raise ValueError("Probabilities cannot be negative")
+                
+                prob_sum = sum(probabilities)
+                if abs(prob_sum - 1.0) > 0.01:
+                    logger.warning(f"Probabilities sum to {prob_sum:.3f}, not 1.0")
+                
+                if any(q < 0 for q in trade_sizes):
+                    raise ValueError("Trade sizes cannot be negative")
+                
+                # Market structure validation
+                if spread_1 > spread_0:
+                    logger.warning(f"Spread increased from {spread_0:.1f} to {spread_1:.1f}bps with MM")
+                
+                if volume_0 == 0 and volume_mm > 0:
+                    logger.warning("Zero original volume but positive MM volume")
+                
+                # Extreme scenario checks
+                if volatility > 3.0:  # >300% annualized vol
+                    logger.warning(f"Extreme volatility {volatility:.1%} detected")
+                
+                if spread_0 > 1000:  # >10% spread
+                    logger.warning(f"Extremely wide spread {spread_0:.0f}bps detected")
+                    
+            except Exception as e:
+                logger.error(f"Validation failed for Almgren-Chriss model: {e}")
+                if validate_inputs:
+                    raise ValueError(f"Invalid inputs: {e}")
             
         total_value = 0.0
         breakdown = []
@@ -88,11 +158,15 @@ class DepthValuationModels:
                          trade_sizes: List[float],
                          probabilities: List[float],
                          depth_0: float,
-                         depth_mm: float) -> Dict:
+                         depth_mm: float,
+                         asset_price: float = 10.0) -> Dict:
         """
         Kyle's Lambda model: ΔP = λ * Q, where λ = 1/(2*Depth)
-        Value_MM = Σᵢ Qᵢ * P(Qᵢ) * (λ₀ - λ₁) * Qᵢ
+        Value_MM = Σᵢ Qᵢ * P(Qᵢ) * (λ₀ - λ₁) * Qᵢ * Asset_Price
+        
+        Fixed: Proper linear scaling (Q not Q²) and price normalization
         """
+        # Lambda in fractional price impact per unit volume
         lambda_0 = 1 / (2 * depth_0) if depth_0 > 0 else float('inf')
         lambda_1 = 1 / (2 * (depth_0 + depth_mm)) if (depth_0 + depth_mm) > 0 else float('inf')
         
@@ -103,8 +177,9 @@ class DepthValuationModels:
             if Q <= 0 or P_Q <= 0:
                 continue
                 
-            # Linear impact difference
-            impact_reduction = (lambda_0 - lambda_1) * Q * Q
+            # Linear impact difference (corrected: Q not Q²)
+            lambda_diff = lambda_0 - lambda_1
+            impact_reduction = lambda_diff * Q * asset_price  # Convert to dollar terms
             trade_value = P_Q * impact_reduction
             total_value += trade_value
             
@@ -113,6 +188,7 @@ class DepthValuationModels:
                 'probability': P_Q,
                 'lambda_0': lambda_0,
                 'lambda_1': lambda_1,
+                'lambda_diff': lambda_diff,
                 'impact_reduction': impact_reduction,
                 'total_contribution': trade_value
             })
@@ -579,7 +655,7 @@ class DepthValuationModels:
         
         # Kyle's Lambda
         models_results['kyle_lambda'] = self.kyle_lambda_value(
-            trade_sizes, probabilities, depth_0, depth_mm
+            trade_sizes, probabilities, depth_0, depth_mm, asset_price
         )
         
         # Bouchaud Power Law

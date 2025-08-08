@@ -13,22 +13,14 @@ from typing import Dict, List, Any, Optional
 
 # Import modular components
 from config.settings import APP_TITLE, PAGE_LAYOUT, INITIAL_SIDEBAR_STATE
-from config.simple_styles import CORE_CSS, HEADER_HTML, FOOTER_HTML
+from config.styles import MAIN_CSS, FOOTER_HTML
 from utils.logging_config import get_logger
 from utils.error_handling import error_handler_instance, ui_handler, ErrorHandler
-from utils.comprehensive_validation import (
-    ComprehensiveValidator, ValidationConfig, validate_option_inputs_quick, 
-    validate_depth_inputs_quick, pre_calculation_check
-)
-from utils.validation_integration import validation_handler
 from app.session_state import session_manager
 from app.calculations import calculation_orchestrator
 from ui.sidebar import sidebar_manager
 from ui.phase_navigation import phase_nav_manager
 from ui.entity_setup import entity_setup_manager
-
-# Simple Professional UI Components  
-from ui.simple_components import simple_components
 
 # Existing imports for backward compatibility
 from option_pricing import black_scholes_call, black_scholes_put, calculate_greeks
@@ -48,16 +40,9 @@ class ModularOptionsApp:
         self.phase_nav_manager = phase_nav_manager
         self.entity_setup_manager = entity_setup_manager
         
-        # Professional UI components
-        self.components = simple_components
-        
-        # Initialize validation system
-        self.validator = ComprehensiveValidator(ValidationConfig())
-        self.validation_handler = validation_handler
-        
         # Initialize session state
         self.session_manager.initialize_session_state()
-        logger.info("Professional Options App with enhanced UI components initialized")
+        logger.info("Modular Options App initialized")
     
     @ui_handler
     def setup_page_config(self) -> None:
@@ -69,60 +54,19 @@ class ModularOptionsApp:
         )
         
         # Apply custom CSS
-        st.markdown(CORE_CSS, unsafe_allow_html=True)
+        st.markdown(MAIN_CSS, unsafe_allow_html=True)
         logger.debug("Page configuration and styling applied")
     
     @ui_handler
     def display_header(self) -> None:
-        """Display professional application header"""
-        st.markdown(HEADER_HTML, unsafe_allow_html=True)
+        """Display application header"""
+        st.markdown(f'<h1 class="main-header">{APP_TITLE}</h1>', unsafe_allow_html=True)
     
     @ui_handler
     def display_footer(self) -> None:
         """Display application footer"""
         st.markdown("---")
         st.markdown(FOOTER_HTML, unsafe_allow_html=True)
-        
-    def display_quick_metrics(self) -> None:
-        """Display quick metrics using simple components"""
-        st.subheader("📊 Platform Overview")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            self.components.create_metric_card(
-                title="Active Entities", 
-                value=len(self.session_manager.get_entities()),
-                icon="🏢",
-                help_text="Number of configured entities"
-            )
-        
-        with col2:
-            total_tranches = len(self.session_manager.get_tranches())
-            self.components.create_metric_card(
-                title="Total Tranches",
-                value=total_tranches,
-                icon="📊", 
-                help_text="Total option tranches configured"
-            )
-        
-        with col3:
-            total_depth_entries = len(self.session_manager.get_quoting_depths())
-            self.components.create_metric_card(
-                title="Depth Entries",
-                value=total_depth_entries,
-                icon="💰",
-                help_text="Market depth data points"
-            )
-        
-        with col4:
-            current_phase = self.session_manager.get_current_phase()
-            phase_progress = (current_phase / 3.0) * 100
-            st.metric(
-                label="🚀 Progress",
-                value=f"{phase_progress:.0f}%",
-                help="Workflow completion progress"
-            )
     
     def run(self) -> None:
         """Main application run method"""
@@ -133,24 +77,12 @@ class ModularOptionsApp:
             self.setup_page_config()
             self.display_header()
             
-            # Display quick metrics
-            self.display_quick_metrics()
-            st.markdown("---")
-            
             # Get base parameters from sidebar
             params = self.sidebar_manager.create_sidebar()
             logger.debug(f"Base parameters: {params}")
             
-            # Add validation settings to sidebar
-            validation_settings = self.validation_handler.create_validation_sidebar()
-            params.update(validation_settings)
-            
             # Display phase navigation
-            current_phase = self.session_manager.get_current_phase()
-            st.info(f"Current Phase: {current_phase}/3 - {['Entity Setup', 'Tranche Configuration', 'Depth Analysis'][current_phase-1]}")
-            
-            # Display quick validation status
-            st.info("🔍 Validation system ready")
+            self.phase_nav_manager.display_phase_navigation()
             
             # Main content based on current phase
             current_phase = self.session_manager.get_current_phase()
@@ -183,213 +115,42 @@ class ModularOptionsApp:
     
     @ui_handler
     def display_phase_1(self, params: Dict[str, float]) -> None:
-        """Display Phase 1: Entity Setup with Professional UI"""
-        def phase_1_content():
-            # Professional entity setup form
-            entity_data = self.professional_forms.create_entity_form()
-            
-            if entity_data:
-                if self.session_manager.add_entity(entity_data):
-                    self.professional_components.create_validation_feedback(
-                        f"Entity '{entity_data['name']}' added successfully!", 
-                        "success"
-                    )
-                    st.rerun()
-                else:
-                    self.professional_components.create_validation_feedback(
-                        "Failed to add entity. Please try again.", 
-                        "error"
-                    )
-            
-            # Display current entities
-            entities = self.session_manager.get_entities()
-            if entities:
-                entities_df = pd.DataFrame(entities)
-                st.dataframe(  # Replace with simple dataframe
-                    entities_df,
-                    "Current Entities",
-                    "🏢"
-                )
-        
-        # Phase 1 content displayed above
+        """Display Phase 1: Entity Setup"""
+        self.entity_setup_manager.display_phase_1_entity_setup()
     
     @ui_handler
     def display_phase_2(self, params: Dict[str, float]) -> None:
-        """Display Phase 2: Tranche Setup with Professional UI"""
-        def phase_2_content():
-            if not self.session_manager.get_entities():
-                self.professional_components.create_status_indicator(
-                    "Setup Required",
-                    "Please complete Phase 1: Entity Setup first",
-                    "warning"
-                )
-                return
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                # Professional tranche form
-                entities = self.session_manager.get_entities()
-                tranche_data = self.professional_forms.create_tranche_form(entities)
-                
-                if tranche_data:
-                    if self.session_manager.add_tranche(tranche_data):
-                        self.professional_components.create_validation_feedback(
-                            f"Tranche for {tranche_data['entity']} added successfully!",
-                            "success"
-                        )
-                        st.rerun()
-                    else:
-                        self.professional_components.create_validation_feedback(
-                            "Failed to add tranche. Please try again.",
-                            "error"
-                        )
-            
-            with col2:
-                # Display current tranches
-                tranches = self.session_manager.get_tranches()
-                if tranches:
-                    tranches_df = pd.DataFrame(tranches)
-                    st.dataframe(  # Replace with simple dataframe
-                        tranches_df,
-                        "Current Tranches",
-                        "📊"
-                    )
+        """Display Phase 2: Tranche Setup"""
+        col1, col2 = st.columns([1, 1])
         
-        # Phase 2 content displayed above
+        with col1:
+            self.display_phase_2_tranche_setup(params)
+        
+        with col2:
+            self.display_tranches_table()
     
     @ui_handler 
     def display_phase_3(self, params: Dict[str, float]) -> None:
-        """Display Phase 3: Quoting Depths and Calculations with Professional UI"""
-        def phase_3_content():
-            if not self.session_manager.get_tranches():
-                self.professional_components.create_status_indicator(
-                    "Setup Required",
-                    "Please complete Phase 2: Tranche Configuration first",
-                    "warning"
-                )
-                return
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                # Professional depth form
-                tranches = self.session_manager.get_tranches()
-                entities = list(set(tranche['entity'] for tranche in tranches))
-                exchanges = ["Binance", "OKX", "Coinbase", "Bybit", "KuCoin", "MEXC", "Gate", "Bitvavo", "Bitget", "Other"]
-                
-                depth_data = self.professional_forms.create_depth_form(entities, exchanges)
-                
-                if depth_data:
-                    if self.session_manager.add_quoting_depth(depth_data):
-                        self.professional_components.create_validation_feedback(
-                            f"Depth for {depth_data['entity']} on {depth_data['exchange']} added successfully!",
-                            "success"
-                        )
-                        st.rerun()
-                    else:
-                        self.professional_components.create_validation_feedback(
-                            "Failed to add quoting depth. Please try again.",
-                            "error"
-                        )
-            
-            with col2:
-                # Display current depths
-                depths = self.session_manager.get_quoting_depths()
-                if depths:
-                    depths_df = pd.DataFrame(depths)
-                    st.dataframe(  # Replace with simple dataframe
-                        depths_df,
-                        "Current Quoting Depths",
-                        "💰"
-                    )
-            
-            # Portfolio summary and calculations
-            self._display_portfolio_section(params)
+        """Display Phase 3: Quoting Depths and Calculations"""
+        col1, col2 = st.columns([1, 1])
         
-        # Phase 3 content displayed above
-    
-    def _display_portfolio_section(self, params: Dict[str, float]) -> None:
-        """Display professional portfolio section with calculations"""
-        try:
-            # Check if calculations can be performed
+        with col1:
+            self.display_phase_3_quoting_depths(params)
+        
+        with col2:
+            self.display_quoting_depths_table()
+        
+        # Calculation section
+        if self.session_manager.get_tranches():
             entities_with_depths = self.session_manager.get_entities_with_depths()
             required_entities = self.session_manager.get_required_entities()
             
-            if not required_entities.issubset(entities_with_depths):
+            if required_entities.issubset(entities_with_depths):
+                # All entities have depths - show calculations
+                self.display_calculations_section(params)
+            else:
                 missing_entities = required_entities - entities_with_depths
-                self.professional_components.create_status_indicator(
-                    "Incomplete Setup",
-                    f"Missing depth data for: {', '.join(missing_entities)}",
-                    "warning"
-                )
-                return
-            
-            # Validation dashboard
-            with st.expander("📊 Validation Dashboard", expanded=False):
-                st.info("✅ Validation Dashboard - All systems operational")
-            
-            # Calculate button with professional styling
-            if st.button("🚀 Calculate Portfolio Options", type="primary", use_container_width=True):
-                with st.spinner("Calculating portfolio options..."):
-                    try:
-                        results = self.calculation_orchestrator.perform_options_calculations(params)
-                        self.session_manager.set_calculation_results(results)
-                        
-                        # Show success message
-                        self.professional_components.create_validation_feedback(
-                            "Portfolio calculations completed successfully!",
-                            "success"
-                        )
-                        
-                        st.rerun()
-                        
-                    except Exception as e:
-                        self.professional_components.create_validation_feedback(
-                            f"Calculation failed: {str(e)}",
-                            "error"
-                        )
-            
-            # Display results if available
-            results = self.session_manager.get_calculation_results()
-            if results:
-                self._display_portfolio_results(results, params)
-                
-        except Exception as e:
-            logger.error(f"Error displaying portfolio section: {e}")
-            st.error("Error displaying portfolio section")
-    
-    def _display_portfolio_results(self, results: Dict[str, Any], params: Dict[str, float]) -> None:
-        """Display professional portfolio results"""
-        try:
-            # Portfolio overview
-            portfolio_data = {
-                'total_portfolio_value': results.get('total_portfolio_value', 0),
-                'active_entities': len(results.get('entities', [])),
-                'total_options': sum(len(entity.get('options', [])) for entity in results.get('entities', {}).values()),
-                'average_strike_price': results.get('average_strike_price', 0),
-                'portfolio_risk': results.get('portfolio_risk', 0),
-                'average_volatility': params.get('volatility', 0),
-                'average_time_to_expiration': results.get('average_time_to_expiration', 0),
-                'depth_coverage': results.get('depth_coverage', 0),
-                'entity_breakdown': results.get('entity_breakdown', {}),
-                'entities': results.get('entities', {}),
-                'options_details': results.get('options_details', [])
-            }
-            
-            self.portfolio_summary.create_portfolio_overview(portfolio_data)
-            
-            # Risk dashboard
-            if 'risk_metrics' in results:
-                self.portfolio_summary.create_risk_dashboard(results['risk_metrics'])
-            
-            # Performance dashboard
-            if 'performance_metrics' in results:
-                self.portfolio_summary.create_performance_dashboard(results['performance_metrics'])
-                
-        except Exception as e:
-            logger.error(f"Error displaying portfolio results: {e}")
-            st.error("Error displaying portfolio results")
+                st.warning(f"Please add quoting depths for all entities before calculating options. Missing: {', '.join(missing_entities)}")
     
     def display_phase_2_tranche_setup(self, params: Dict[str, float]) -> None:
         """Display Phase 2 tranche setup (legacy implementation for now)"""
@@ -487,50 +248,26 @@ class ModularOptionsApp:
             st.info(f"**Time to Expiration:** {time_to_expiration:.2f} years (from month {start_month} to {loan_duration})")
             
             if st.form_submit_button("Add Tranche", use_container_width=True):
-                # Validate tranche parameters before adding
-                validation_params = {
-                    'spot_price': 10.0,  # Default current price
-                    'strike_price': strike_price,
+                new_tranche = {
+                    'entity': selected_entity,
+                    'option_type': option_type,
+                    'loan_duration': loan_duration,
+                    'start_month': start_month,
                     'time_to_expiration': time_to_expiration,
-                    'risk_free_rate': 0.05,
-                    'volatility': 0.30,
-                    'option_type': option_type
+                    'strike_price': strike_price,
+                    'allocation_method': allocation_method,
+                    'token_percentage': token_percentage,
+                    'token_count': token_count
                 }
                 
-                # Run validation
-                is_valid = validate_option_inputs_quick(
-                    spot=validation_params['spot_price'],
-                    strike=validation_params['strike_price'],
-                    time=validation_params['time_to_expiration'],
-                    rate=validation_params['risk_free_rate'],
-                    vol=validation_params['volatility'],
-                    option_type=validation_params['option_type'],
-                    show=True
-                )
-                
-                if is_valid:
-                    new_tranche = {
-                        'entity': selected_entity,
-                        'option_type': option_type,
-                        'loan_duration': loan_duration,
-                        'start_month': start_month,
-                        'time_to_expiration': time_to_expiration,
-                        'strike_price': strike_price,
-                        'allocation_method': allocation_method,
-                        'token_percentage': token_percentage,
-                        'token_count': token_count
-                    }
-                    
-                    if self.session_manager.add_tranche(new_tranche):
-                        if allocation_method == "Percentage of Total Tokens":
-                            st.success(f"✅ Added validated {option_type} option for {selected_entity} ({token_percentage}% of tokens)")
-                        else:
-                            st.success(f"✅ Added validated {option_type} option for {selected_entity} ({token_count:,} tokens)")
-                        st.rerun()
+                if self.session_manager.add_tranche(new_tranche):
+                    if allocation_method == "Percentage of Total Tokens":
+                        st.success(f"Added {option_type} option for {selected_entity} ({token_percentage}% of tokens)")
                     else:
-                        st.error("Failed to add tranche")
+                        st.success(f"Added {option_type} option for {selected_entity} ({token_count:,} tokens)")
+                    st.rerun()
                 else:
-                    st.error("❌ Cannot add tranche - validation failed. Please fix the issues above.")
+                    st.error("Failed to add tranche")
     
     def display_phase_3_quoting_depths(self, params: Dict[str, float]) -> None:
         """Display Phase 3 quoting depths setup (legacy implementation for now)"""
@@ -689,49 +426,35 @@ class ModularOptionsApp:
                 st.info(f"**Calculated Depths:** 50bps: ${depth_50bps:,.0f}, 100bps: ${depth_100bps:,.0f}, 200bps: ${depth_200bps:,.0f}")
             
             if st.form_submit_button("Add Quoting Depth", use_container_width=True):
-                # Validate depth parameters before adding
-                is_valid = validate_depth_inputs_quick(
-                    spread_bps=bid_ask_spread,
-                    d50=depth_50bps,
-                    d100=depth_100bps,
-                    d200=depth_200bps,
-                    price=10.0,  # Default asset price
-                    exchange=selected_exchange,
-                    show=True
-                )
+                # Check if this entity-exchange combination already exists
+                existing_depths = self.session_manager.get_quoting_depths()
+                existing_entry = next((
+                    entry for entry in existing_depths 
+                    if entry['entity'] == selected_entity and entry['exchange'] == selected_exchange
+                ), None)
                 
-                if is_valid:
-                    # Check if this entity-exchange combination already exists
-                    existing_depths = self.session_manager.get_quoting_depths()
-                    existing_entry = next((
-                        entry for entry in existing_depths 
-                        if entry['entity'] == selected_entity and entry['exchange'] == selected_exchange
-                    ), None)
-                    
-                    if existing_entry:
-                        st.warning(f"Entry for {selected_entity} on {selected_exchange} already exists. Please delete the existing entry first.")
-                    else:
-                        new_entry = {
-                            'entity': selected_entity,
-                            'exchange': selected_exchange,
-                            'bid_ask_spread': bid_ask_spread,
-                            'depth_method': depth_method,
-                            'depth_50bps': depth_50bps,
-                            'depth_100bps': depth_100bps,
-                            'depth_200bps': depth_200bps,
-                            'depth_50bps_pct': depth_50bps_pct,
-                            'depth_100bps_pct': depth_100bps_pct,
-                            'depth_200bps_pct': depth_200bps_pct,
-                            'entity_loan_value': total_entity_value
-                        }
-                        
-                        if self.session_manager.add_quoting_depth(new_entry):
-                            st.success(f"✅ Added validated quoting depth for {selected_entity} on {selected_exchange}")
-                            st.rerun()
-                        else:
-                            st.error("Failed to add quoting depth")
+                if existing_entry:
+                    st.warning(f"Entry for {selected_entity} on {selected_exchange} already exists. Please delete the existing entry first.")
                 else:
-                    st.error("❌ Cannot add quoting depth - validation failed. Please fix the issues above.")
+                    new_entry = {
+                        'entity': selected_entity,
+                        'exchange': selected_exchange,
+                        'bid_ask_spread': bid_ask_spread,
+                        'depth_method': depth_method,
+                        'depth_50bps': depth_50bps,
+                        'depth_100bps': depth_100bps,
+                        'depth_200bps': depth_200bps,
+                        'depth_50bps_pct': depth_50bps_pct,
+                        'depth_100bps_pct': depth_100bps_pct,
+                        'depth_200bps_pct': depth_200bps_pct,
+                        'entity_loan_value': total_entity_value
+                    }
+                    
+                    if self.session_manager.add_quoting_depth(new_entry):
+                        st.success(f"Added quoting depth for {selected_entity} on {selected_exchange}")
+                        st.rerun()
+                    else:
+                        st.error("Failed to add quoting depth")
     
     def display_calculations_section(self, params: Dict[str, float]) -> None:
         """Display calculations and results section"""
@@ -742,49 +465,12 @@ class ModularOptionsApp:
             # Options calculations
             st.markdown("## Calculate Options")
             
-            # Add validation dashboard
-            if st.button("🔍 Validate Portfolio", use_container_width=True):
-                st.markdown("### Portfolio Validation Results")
-                tranches = self.session_manager.get_tranches()
-                depths = self.session_manager.get_quoting_depths()
-                
-                # Run comprehensive portfolio validation
-                is_portfolio_valid = self.validator.validate_portfolio_consistency(
-                    tranches=tranches,
-                    depth_data=depths,
-                    global_params=params,
-                    show_results=True
-                )
-                
-                if is_portfolio_valid[0]:
-                    st.success("✅ Portfolio passed all validation checks")
-                else:
-                    st.warning("⚠️ Portfolio has validation issues - review before calculating")
-            
             if st.button("Calculate All Options", type="primary", use_container_width=True):
-                # Pre-calculation validation gate
-                calculation_params = {
-                    'spot_price': params.get('spot_price', 10.0),
-                    'strike_price': 10.0,  # Will be validated per tranche
-                    'time_to_expiration': 1.0,  # Will be validated per tranche
-                    'risk_free_rate': params.get('risk_free_rate', 0.05),
-                    'volatility': params.get('volatility', 0.3)
-                }
-                
-                can_calculate = pre_calculation_check(calculation_params, "options")
-                
-                if can_calculate:
-                    with st.spinner("Calculating option values..."):
-                        try:
-                            results = self.calculation_orchestrator.perform_options_calculations(params)
-                            self.session_manager.set_calculation_results(results)
-                            st.success("✅ Calculations completed successfully!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Calculation failed: {str(e)}")
-                            logger.error(f"Options calculation error: {e}")
-                else:
-                    st.error("❌ Pre-calculation validation failed. Cannot proceed with calculations.")
+                with st.spinner("Calculating option values..."):
+                    results = self.calculation_orchestrator.perform_options_calculations(params)
+                    self.session_manager.set_calculation_results(results)
+                    st.success("Calculations completed!")
+                    st.rerun()
             
             # Display results if available
             self.display_results(params)
@@ -960,8 +646,6 @@ class ModularOptionsApp:
         plt.tight_layout()
         st.pyplot(fig)
         plt.close()
-    
-# Removed unused validation status widget function
     
     def display_results(self, params):
         """Display calculation results (legacy implementation)"""

@@ -1,5 +1,6 @@
 import math
 from typing import Dict, List, Tuple, Optional
+from config.model_constants import CRYPTO_DEPTH
 
 class CryptoEffectiveDepthCalculator:
     """
@@ -8,41 +9,24 @@ class CryptoEffectiveDepthCalculator:
     """
     
     def __init__(self):
-        # Exchange tier multipliers based on crypto market liquidity patterns
-        self.exchange_tiers = {
-            # Tier 1: Major centralized exchanges
-            'Binance': 0.90,
-            'Coinbase': 0.88, 
-            'OKX': 0.85,
-            'Bybit': 0.82,
-            
-            # Tier 2: Mid-tier exchanges
-            'KuCoin': 0.75,
-            'MEXC': 0.72,
-            'Gate': 0.70,
-            'Bitget': 0.68,
-            
-            # Tier 3: Smaller/DEX
-            'Bitvavo': 0.60,
-            'Other': 0.50,  # Conservative default
-        }
+        # Load configuration from constants
+        self.exchange_tiers = CRYPTO_DEPTH.EXCHANGE_TIERS.copy()
         
-        # Spread tier base multipliers (refined from experience)
+        # Spread tier base multipliers
         self.spread_tier_multipliers = {
-            '50bps': 0.95,   # Slightly reduced from 1.0 (realistic fill rates)
-            '100bps': 0.78,  # Slightly higher than 0.75 (better than expected)
-            '200bps': 0.55   # Higher than 0.50 (deeper crypto books are more valuable)
+            '50bps': CRYPTO_DEPTH.SPREAD_50BPS_EFFICIENCY,
+            '100bps': CRYPTO_DEPTH.SPREAD_100BPS_EFFICIENCY,
+            '200bps': CRYPTO_DEPTH.SPREAD_200BPS_EFFICIENCY
         }
         
-        # Crypto-specific parameters
+        # Crypto-specific parameters loaded from config
         self.crypto_params = {
-            'vol_impact_factor': 1.5,        # Gentler than traditional markets
-            'spread_bonus_factor': 1000,     # How much tighter spreads matter
-            'liquidity_bonus_threshold': 100000,  # $100k depth threshold for bonus
-            'max_liquidity_bonus': 1.25,    # Max 25% bonus for large sizes
-            'arb_efficiency_factor': 0.85,  # Crypto arb reduces depth value by 15%
-            'cascade_protection_bonus': 1.1, # 10% bonus for cascade protection
-            'mev_penalty_factor': 0.95,     # 5% MEV penalty on smaller spreads
+            'vol_impact_factor': CRYPTO_DEPTH.VOL_IMPACT_FACTOR,
+            'spread_bonus_factor': CRYPTO_DEPTH.SPREAD_BONUS_FACTOR,
+            'liquidity_bonus_threshold': CRYPTO_DEPTH.LIQUIDITY_BONUS_THRESHOLD,
+            'max_liquidity_bonus': CRYPTO_DEPTH.LIQUIDITY_BONUS_MAX,
+            'cascade_protection_bonus': CRYPTO_DEPTH.CASCADE_PROTECTION_BONUS,
+            'mev_penalty_factor': CRYPTO_DEPTH.MEV_PENALTY_FACTOR,
         }
     
     def get_exchange_tier_multiplier(self, exchange: str) -> float:
@@ -57,8 +41,8 @@ class CryptoEffectiveDepthCalculator:
         # Crypto markets handle volatility better than traditional markets
         vol_penalty = 1 / (1 + volatility * self.crypto_params['vol_impact_factor'])
         
-        # Floor at 25% (vs 30% in old system) - crypto MMs can handle more vol
-        return max(0.25, vol_penalty)
+        # Floor at configured level - crypto MMs can handle more vol than traditional
+        return max(CRYPTO_DEPTH.VOL_ADJUSTMENT_FLOOR, vol_penalty)
     
     def calculate_spread_adjustment(self, spread_bps: float, target_spread_bps: float) -> float:
         """
@@ -68,8 +52,8 @@ class CryptoEffectiveDepthCalculator:
         spread_diff = target_spread_bps - spread_bps
         spread_factor = 1 + (spread_diff / self.crypto_params['spread_bonus_factor'])
         
-        # Bound between 0.7x and 1.3x
-        return max(0.7, min(1.3, spread_factor))
+        # Bound between configured min and max
+        return max(CRYPTO_DEPTH.SPREAD_BONUS_MIN, min(CRYPTO_DEPTH.SPREAD_BONUS_MAX, spread_factor))
     
     def calculate_liquidity_bonus(self, depth: float) -> float:
         """
@@ -81,7 +65,7 @@ class CryptoEffectiveDepthCalculator:
             
         # Logarithmic bonus for size
         size_ratio = depth / self.crypto_params['liquidity_bonus_threshold']
-        bonus = 1 + math.log10(max(1.0, size_ratio)) * 0.25
+        bonus = 1 + math.log10(max(1.0, size_ratio)) * CRYPTO_DEPTH.LIQUIDITY_LOG_MULTIPLIER
         
         return min(self.crypto_params['max_liquidity_bonus'], bonus)
     
@@ -89,7 +73,7 @@ class CryptoEffectiveDepthCalculator:
         """
         MEV penalty for tight spreads (more susceptible to sandwich attacks)
         """
-        if spread_bps < 25:  # Tight spreads more vulnerable
+        if spread_bps < CRYPTO_DEPTH.MEV_TIGHT_SPREAD_THRESHOLD:  # Tight spreads more vulnerable
             mev_penalty = self.crypto_params['mev_penalty_factor']
         else:
             mev_penalty = 1.0
@@ -124,7 +108,7 @@ class CryptoEffectiveDepthCalculator:
         vol_adjustment = self.calculate_volatility_adjustment(volatility)
         
         # Spread adjustment based on how tight/wide vs target
-        target_spread = {'50bps': 60, '100bps': 110, '200bps': 210}.get(spread_tier, 100)
+        target_spread = CRYPTO_DEPTH.TARGET_SPREADS.get(spread_tier, 100)
         spread_adjustment = self.calculate_spread_adjustment(bid_ask_spread, target_spread)
         
         # Liquidity size bonus

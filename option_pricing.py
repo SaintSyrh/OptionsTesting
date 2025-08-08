@@ -2,76 +2,271 @@ import math
 import numpy as np
 from datetime import datetime, timedelta
 from scipy.stats import norm
+from typing import Dict, Any, Optional, Tuple, Union
+import logging
 
-def black_scholes_call(S, K, T, r, sigma):
-    """
-    Calculate Black-Scholes call option price
-    
-    S: Current asset price (total value of asset / total shares)
-    K: Strike price
-    T: Time to expiration (in years)
-    r: Risk-free rate
-    sigma: Volatility
-    """
-    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    
-    call_price = S * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2)
-    return call_price
+from utils.comprehensive_validation import validate_option_inputs_quick
 
-def black_scholes_put(S, K, T, r, sigma):
-    """
-    Calculate Black-Scholes put option price
-    
-    S: Current asset price (total value of asset / total shares)
-    K: Strike price
-    T: Time to expiration (in years)
-    r: Risk-free rate
-    sigma: Volatility
-    """
-    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    
-    put_price = K * math.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-    return put_price
+logger = logging.getLogger(__name__)
 
-def calculate_greeks(S, K, T, r, sigma):
+def black_scholes_call(
+    S: float, 
+    K: float, 
+    T: float, 
+    r: float, 
+    sigma: float, 
+    validate_inputs: bool = True
+) -> float:
     """
-    Calculate option Greeks
+    Calculate Black-Scholes call option price with comprehensive input validation
+    
+    Args:
+        S: Current asset price (total value of asset / total shares)
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free rate
+        sigma: Volatility
+        validate_inputs: Whether to perform input validation (default: True)
+    
+    Returns:
+        float: Call option price
+        
+    Raises:
+        ValueError: If inputs fail validation and validate_inputs=True
     """
-    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
+    if validate_inputs:
+        is_valid = validate_option_inputs_quick(
+            spot=S, strike=K, time=T, rate=r, vol=sigma, 
+            option_type="call", show=False
+        )
+        if not is_valid:
+            raise ValueError("Invalid inputs for Black-Scholes call calculation. Check validation messages.")
     
-    # Delta
-    delta_call = norm.cdf(d1)
-    delta_put = norm.cdf(d1) - 1
+    try:
+        # Check for edge cases that could cause numerical issues
+        if T <= 0:
+            return max(S - K, 0)  # Return intrinsic value at expiration
+        
+        if sigma <= 0:
+            # Zero volatility case - return intrinsic value
+            return max(S - K * math.exp(-r * T), 0)
+        
+        # Standard Black-Scholes calculation
+        d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+        d2 = d1 - sigma * math.sqrt(T)
+        
+        call_price = S * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2)
+        
+        # Sanity check on result
+        intrinsic_value = max(S - K * math.exp(-r * T), 0)
+        if call_price < intrinsic_value - 1e-10:  # Small tolerance for numerical precision
+            logger.warning(f"Call price {call_price:.6f} below intrinsic value {intrinsic_value:.6f}")
+            call_price = intrinsic_value
+        
+        return call_price
+        
+    except Exception as e:
+        logger.error(f"Error in Black-Scholes call calculation: {e}")
+        logger.error(f"Parameters: S={S}, K={K}, T={T}, r={r}, sigma={sigma}")
+        raise ValueError(f"Black-Scholes call calculation failed: {e}")
+
+def black_scholes_put(
+    S: float, 
+    K: float, 
+    T: float, 
+    r: float, 
+    sigma: float, 
+    validate_inputs: bool = True
+) -> float:
+    """
+    Calculate Black-Scholes put option price with comprehensive input validation
     
-    # Gamma
-    gamma = norm.pdf(d1) / (S * sigma * math.sqrt(T))
+    Args:
+        S: Current asset price (total value of asset / total shares)
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free rate
+        sigma: Volatility
+        validate_inputs: Whether to perform input validation (default: True)
     
-    # Theta
-    theta_call = (-S * norm.pdf(d1) * sigma / (2 * math.sqrt(T)) 
-                  - r * K * math.exp(-r * T) * norm.cdf(d2))
-    theta_put = (-S * norm.pdf(d1) * sigma / (2 * math.sqrt(T)) 
-                 + r * K * math.exp(-r * T) * norm.cdf(-d2))
+    Returns:
+        float: Put option price
+        
+    Raises:
+        ValueError: If inputs fail validation and validate_inputs=True
+    """
+    if validate_inputs:
+        is_valid = validate_option_inputs_quick(
+            spot=S, strike=K, time=T, rate=r, vol=sigma, 
+            option_type="put", show=False
+        )
+        if not is_valid:
+            raise ValueError("Invalid inputs for Black-Scholes put calculation. Check validation messages.")
     
-    # Vega
-    vega = S * norm.pdf(d1) * math.sqrt(T)
+    try:
+        # Check for edge cases that could cause numerical issues
+        if T <= 0:
+            return max(K - S, 0)  # Return intrinsic value at expiration
+        
+        if sigma <= 0:
+            # Zero volatility case - return intrinsic value
+            return max(K * math.exp(-r * T) - S, 0)
+        
+        # Standard Black-Scholes calculation
+        d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+        d2 = d1 - sigma * math.sqrt(T)
+        
+        put_price = K * math.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+        
+        # Sanity check on result
+        intrinsic_value = max(K * math.exp(-r * T) - S, 0)
+        if put_price < intrinsic_value - 1e-10:  # Small tolerance for numerical precision
+            logger.warning(f"Put price {put_price:.6f} below intrinsic value {intrinsic_value:.6f}")
+            put_price = intrinsic_value
+        
+        return put_price
+        
+    except Exception as e:
+        logger.error(f"Error in Black-Scholes put calculation: {e}")
+        logger.error(f"Parameters: S={S}, K={K}, T={T}, r={r}, sigma={sigma}")
+        raise ValueError(f"Black-Scholes put calculation failed: {e}")
+
+def calculate_greeks(
+    S: float, 
+    K: float, 
+    T: float, 
+    r: float, 
+    sigma: float, 
+    validate_inputs: bool = True
+) -> Dict[str, float]:
+    """
+    Calculate option Greeks with validation and edge case handling
     
-    # Rho
-    rho_call = K * T * math.exp(-r * T) * norm.cdf(d2)
-    rho_put = -K * T * math.exp(-r * T) * norm.cdf(-d2)
+    Args:
+        S: Current asset price
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free rate
+        sigma: Volatility
+        validate_inputs: Whether to perform input validation
     
-    return {
-        'delta_call': delta_call,
-        'delta_put': delta_put,
-        'gamma': gamma,
-        'theta_call': theta_call / 365,  # Daily theta
-        'theta_put': theta_put / 365,    # Daily theta
-        'vega': vega / 100,              # Vega per 1% volatility change
-        'rho_call': rho_call / 100,      # Rho per 1% interest rate change
-        'rho_put': rho_put / 100
-    }
+    Returns:
+        dict: Dictionary containing all Greeks
+    """
+    if validate_inputs:
+        is_valid = validate_option_inputs_quick(
+            spot=S, strike=K, time=T, rate=r, vol=sigma, 
+            option_type="call", show=False
+        )
+        if not is_valid:
+            logger.warning("Invalid inputs for Greeks calculation, proceeding with warnings")
+    
+    try:
+        # Handle edge cases
+        if T <= 0:
+            # At expiration, most Greeks become undefined or extreme
+            return {
+                'delta_call': 1.0 if S > K else 0.0,
+                'delta_put': -1.0 if S < K else 0.0,
+                'gamma': float('inf') if abs(S - K) < 1e-10 else 0.0,  # Gamma explosion at ATM
+                'theta_call': 0.0,
+                'theta_put': 0.0,
+                'vega': 0.0,
+                'rho_call': 0.0,
+                'rho_put': 0.0
+            }
+        
+        if sigma <= 0:
+            # Zero volatility case
+            if S > K:
+                return {
+                    'delta_call': 1.0, 'delta_put': 0.0, 'gamma': 0.0,
+                    'theta_call': r * K * math.exp(-r * T),
+                    'theta_put': 0.0, 'vega': 0.0,
+                    'rho_call': K * T * math.exp(-r * T),
+                    'rho_put': 0.0
+                }
+            elif S < K:
+                return {
+                    'delta_call': 0.0, 'delta_put': -1.0, 'gamma': 0.0,
+                    'theta_call': 0.0,
+                    'theta_put': -r * K * math.exp(-r * T),
+                    'vega': 0.0, 'rho_call': 0.0,
+                    'rho_put': -K * T * math.exp(-r * T)
+                }
+            else:  # S == K
+                return {
+                    'delta_call': 0.5, 'delta_put': -0.5, 'gamma': float('inf'),
+                    'theta_call': 0.0, 'theta_put': 0.0, 'vega': 0.0,
+                    'rho_call': 0.5 * K * T * math.exp(-r * T),
+                    'rho_put': -0.5 * K * T * math.exp(-r * T)
+                }
+        
+        # Standard Greeks calculation
+        d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+        d2 = d1 - sigma * math.sqrt(T)
+        
+        # Check for numerical stability issues
+        if abs(d1) > 10 or abs(d2) > 10:
+            logger.warning(f"Extreme d1/d2 values detected: d1={d1:.3f}, d2={d2:.3f}")
+        
+        # Delta
+        delta_call = norm.cdf(d1)
+        delta_put = norm.cdf(d1) - 1
+        
+        # Gamma
+        gamma = norm.pdf(d1) / (S * sigma * math.sqrt(T))
+        
+        # Check for gamma explosion
+        if gamma > 100 / S:  # Arbitrary threshold
+            logger.warning(f"High gamma detected: {gamma:.6f} - near expiry or ATM risk")
+        
+        # Theta
+        theta_term1 = -S * norm.pdf(d1) * sigma / (2 * math.sqrt(T))
+        theta_term2_call = -r * K * math.exp(-r * T) * norm.cdf(d2)
+        theta_term2_put = r * K * math.exp(-r * T) * norm.cdf(-d2)
+        
+        theta_call = theta_term1 + theta_term2_call
+        theta_put = theta_term1 + theta_term2_put
+        
+        # Vega
+        vega = S * norm.pdf(d1) * math.sqrt(T)
+        
+        # Rho
+        rho_call = K * T * math.exp(-r * T) * norm.cdf(d2)
+        rho_put = -K * T * math.exp(-r * T) * norm.cdf(-d2)
+        
+        # Check for reasonable ranges
+        if not (0 <= delta_call <= 1):
+            logger.warning(f"Delta call out of range [0,1]: {delta_call:.6f}")
+        if not (-1 <= delta_put <= 0):
+            logger.warning(f"Delta put out of range [-1,0]: {delta_put:.6f}")
+        
+        return {
+            'delta_call': delta_call,
+            'delta_put': delta_put,
+            'gamma': gamma,
+            'theta_call': theta_call / 365,  # Daily theta
+            'theta_put': theta_put / 365,    # Daily theta
+            'vega': vega / 100,              # Vega per 1% volatility change
+            'rho_call': rho_call / 100,      # Rho per 1% interest rate change
+            'rho_put': rho_put / 100
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in Greeks calculation: {e}")
+        logger.error(f"Parameters: S={S}, K={K}, T={T}, r={r}, sigma={sigma}")
+        # Return NaN values to indicate calculation failure
+        return {
+            'delta_call': float('nan'),
+            'delta_put': float('nan'),
+            'gamma': float('nan'),
+            'theta_call': float('nan'),
+            'theta_put': float('nan'),
+            'vega': float('nan'),
+            'rho_call': float('nan'),
+            'rho_put': float('nan')
+        }
 
 def get_user_inputs():
     """

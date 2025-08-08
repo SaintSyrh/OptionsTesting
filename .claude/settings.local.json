@@ -3,7 +3,13 @@
     "allow": [
       "Bash(streamlit run:*)",
       "Bash(python:*)",
-      "WebFetch(domain:claude.ai)"
+      "WebFetch(domain:claude.ai)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(pip install:*)",
+      "Bash(timeout 10s streamlit run:*)",
+      "Bash(timeout 15s streamlit run:*)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }
