@@ -59,6 +59,8 @@ def initialize_session_state():
         st.session_state.entities_data = []
     if 'tranches_data' not in st.session_state:
         st.session_state.tranches_data = []
+    if 'quoting_depths_data' not in st.session_state:
+        st.session_state.quoting_depths_data = []
     if 'calculation_results' not in st.session_state:
         st.session_state.calculation_results = None
 
@@ -183,6 +185,7 @@ def phase_1_entity_setup():
             if st.button("Clear Entities", use_container_width=True):
                 st.session_state.entities_data = []
                 st.session_state.tranches_data = []
+                st.session_state.quoting_depths_data = []
                 st.rerun()
         
         with col2:
@@ -312,26 +315,243 @@ def display_phase_navigation():
     """Display phase navigation"""
     st.markdown("---")
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3 = st.columns([1, 3, 1])
     
     with col1:
-        if st.session_state.current_phase == 2:
-            if st.button("Phase 1", use_container_width=True):
-                st.session_state.current_phase = 1
+        if st.session_state.current_phase > 1:
+            prev_phase = st.session_state.current_phase - 1
+            if st.button(f"Phase {prev_phase}", use_container_width=True):
+                st.session_state.current_phase = prev_phase
                 st.rerun()
     
     with col2:
         # Phase indicator
         if st.session_state.current_phase == 1:
-            st.markdown("**Phase 1: Entity Setup** → Phase 2: Tranche Setup")
+            st.markdown("**Phase 1: Entity Setup** → Phase 2: Tranche Setup → Phase 3: Quoting Depths")
+        elif st.session_state.current_phase == 2:
+            st.markdown("Phase 1: Entity Setup → **Phase 2: Tranche Setup** → Phase 3: Quoting Depths")
         else:
-            st.markdown("Phase 1: Entity Setup → **Phase 2: Tranche Setup**")
+            st.markdown("Phase 1: Entity Setup → Phase 2: Tranche Setup → **Phase 3: Quoting Depths**")
     
     with col3:
+        can_advance = False
         if st.session_state.current_phase == 1 and len(st.session_state.entities_data) > 0:
-            if st.button("Phase 2", use_container_width=True):
-                st.session_state.current_phase = 2
+            can_advance = True
+        elif st.session_state.current_phase == 2 and len(st.session_state.tranches_data) > 0:
+            can_advance = True
+        
+        if can_advance and st.session_state.current_phase < 3:
+            next_phase = st.session_state.current_phase + 1
+            if st.button(f"Phase {next_phase}", use_container_width=True):
+                st.session_state.current_phase = next_phase
                 st.rerun()
+
+def phase_3_quoting_depths():
+    """Phase 3: Quoting Depths Configuration"""
+    st.markdown("## Phase 3: Quoting Depths")
+    
+    if not st.session_state.tranches_data:
+        st.warning("No tranches configured. Please complete Phase 2 first.")
+        if st.button("Back to Phase 2"):
+            st.session_state.current_phase = 2
+            st.rerun()
+        return
+    
+    st.markdown("### Configure exchange quoting depths for each entity")
+    st.info("Each entity must provide liquidity depth information across different exchanges.")
+    
+    # Get unique entities from tranches
+    entities = list(set(tranche['entity'] for tranche in st.session_state.tranches_data))
+    
+    # Predefined exchanges
+    exchanges = [
+        "Binance", "OKX", "Coinbase", "Bybit", "KuCoin", 
+        "MEXC", "Gate", "Bitvavo", "Bitget", "Other"
+    ]
+    
+    with st.form("quoting_depths_form"):
+        st.markdown("**Add Quoting Depth Entry**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            selected_entity = st.selectbox("Select Entity", entities)
+        
+        with col2:
+            selected_exchange = st.selectbox("Exchange", exchanges)
+        
+        # Quoting depth inputs
+        st.markdown("**Market Depth Information**")
+        col3, col4, col5, col6 = st.columns(4)
+        
+        with col3:
+            bid_ask_spread = st.number_input(
+                "Bid/Ask Spread (bps)",
+                min_value=0.0,
+                max_value=1000.0,
+                value=10.0,
+                step=0.1,
+                format="%.1f",
+                help="Bid-ask spread in basis points"
+            )
+        
+        with col4:
+            depth_50bps = st.number_input(
+                "Depth @ 50bps ($)",
+                min_value=0.0,
+                value=50000.0,
+                step=1000.0,
+                format="%.0f",
+                help="Liquidity depth at 50 basis points"
+            )
+        
+        with col5:
+            depth_100bps = st.number_input(
+                "Depth @ 100bps ($)",
+                min_value=0.0,
+                value=100000.0,
+                step=1000.0,
+                format="%.0f",
+                help="Liquidity depth at 100 basis points"
+            )
+        
+        with col6:
+            depth_200bps = st.number_input(
+                "Depth @ 200bps ($)",
+                min_value=0.0,
+                value=200000.0,
+                step=1000.0,
+                format="%.0f",
+                help="Liquidity depth at 200 basis points"
+            )
+        
+        if st.form_submit_button("Add Quoting Depth", use_container_width=True):
+            # Check if this entity-exchange combination already exists
+            existing_entry = next((
+                entry for entry in st.session_state.quoting_depths_data 
+                if entry['entity'] == selected_entity and entry['exchange'] == selected_exchange
+            ), None)
+            
+            if existing_entry:
+                st.warning(f"Entry for {selected_entity} on {selected_exchange} already exists. Please delete the existing entry first.")
+            else:
+                new_entry = {
+                    'entity': selected_entity,
+                    'exchange': selected_exchange,
+                    'bid_ask_spread': bid_ask_spread,
+                    'depth_50bps': depth_50bps,
+                    'depth_100bps': depth_100bps,
+                    'depth_200bps': depth_200bps
+                }
+                st.session_state.quoting_depths_data.append(new_entry)
+                st.success(f"Added quoting depth for {selected_entity} on {selected_exchange}")
+                st.rerun()
+
+def display_quoting_depths_table():
+    """Display current quoting depths in an editable table"""
+    if st.session_state.quoting_depths_data:
+        st.markdown("### Current Quoting Depths")
+        
+        # Sorting options
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            sort_option = st.selectbox(
+                "Sort by:",
+                ["Original Order", "Entity (A-Z)", "Exchange (A-Z)", "Bid/Ask Spread"],
+                key="depths_sort_option"
+            )
+        
+        # Sort the data based on selection
+        sorted_data = st.session_state.quoting_depths_data.copy()
+        
+        if sort_option == "Entity (A-Z)":
+            sorted_data.sort(key=lambda x: x['entity'])
+        elif sort_option == "Exchange (A-Z)":
+            sorted_data.sort(key=lambda x: x['exchange'])
+        elif sort_option == "Bid/Ask Spread":
+            sorted_data.sort(key=lambda x: x['bid_ask_spread'])
+        
+        # Create DataFrame
+        df = pd.DataFrame(sorted_data)
+        df['Row #'] = range(1, len(df) + 1)
+        
+        # Reorder columns
+        cols = ['Row #', 'entity', 'exchange', 'bid_ask_spread', 'depth_50bps', 'depth_100bps', 'depth_200bps']
+        df = df[cols]
+        
+        # Display table
+        st.dataframe(
+            df,
+            use_container_width=True,
+            column_config={
+                "Row #": st.column_config.NumberColumn("Row #", format="%d", width="small"),
+                "entity": "Entity",
+                "exchange": "Exchange",
+                "bid_ask_spread": st.column_config.NumberColumn("B/A Spread (bps)", format="%.1f"),
+                "depth_50bps": st.column_config.NumberColumn("Depth @ 50bps ($)", format="$%.0f"),
+                "depth_100bps": st.column_config.NumberColumn("Depth @ 100bps ($)", format="$%.0f"),
+                "depth_200bps": st.column_config.NumberColumn("Depth @ 200bps ($)", format="$%.0f")
+            }
+        )
+        
+        # Row deletion section
+        st.markdown("### Delete Specific Rows")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            if len(sorted_data) > 0:
+                row_options = []
+                for i, entry in enumerate(sorted_data, 1):
+                    row_options.append(f"Row {i}: {entry['entity']} - {entry['exchange']} (Spread: {entry['bid_ask_spread']:.1f}bps)")
+                
+                selected_rows = st.multiselect(
+                    "Select rows to delete:",
+                    options=range(len(row_options)),
+                    format_func=lambda x: row_options[x],
+                    key="depths_rows_to_delete"
+                )
+        
+        with col2:
+            if st.button("Delete Selected Rows", type="secondary", use_container_width=True):
+                if selected_rows:
+                    # Remove selected rows (in reverse order to maintain indices)
+                    for row_idx in sorted(selected_rows, reverse=True):
+                        entry_to_remove = sorted_data[row_idx]
+                        original_idx = next(i for i, e in enumerate(st.session_state.quoting_depths_data) if e == entry_to_remove)
+                        st.session_state.quoting_depths_data.pop(original_idx)
+                    
+                    st.success(f"Deleted {len(selected_rows)} row(s)")
+                    st.rerun()
+                else:
+                    st.warning("Please select rows to delete")
+        
+        # Management buttons
+        st.markdown("### Data Management")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("Clear All Depths", use_container_width=True):
+                st.session_state.quoting_depths_data = []
+                st.rerun()
+        
+        with col2:
+            # Check if all entities have at least one entry
+            entities_with_depths = set(entry['entity'] for entry in st.session_state.quoting_depths_data)
+            required_entities = set(tranche['entity'] for tranche in st.session_state.tranches_data)
+            missing_entities = required_entities - entities_with_depths
+            
+            if missing_entities:
+                st.error(f"Missing quoting depths for: {', '.join(missing_entities)}")
+            else:
+                st.success("All entities have quoting depth data")
+        
+        with col3:
+            # Summary info
+            total_entries = len(st.session_state.quoting_depths_data)
+            unique_entities = len(set(e['entity'] for e in st.session_state.quoting_depths_data))
+            st.info(f"**{total_entries}** entries\\n**{unique_entities}** entities")
 
 def display_tranches_table():
     """Display current tranches in an editable table"""
@@ -465,6 +685,7 @@ def display_tranches_table():
                 export_data = {
                     'entities': st.session_state.entities_data,
                     'tranches': st.session_state.tranches_data,
+                    'quoting_depths': st.session_state.quoting_depths_data,
                     'timestamp': datetime.now().isoformat()
                 }
                 st.download_button(
@@ -488,6 +709,8 @@ def display_tranches_table():
                         st.session_state.tranches_data = data['tranches']
                         if 'entities' in data:
                             st.session_state.entities_data = data['entities']
+                        if 'quoting_depths' in data:
+                            st.session_state.quoting_depths_data = data['quoting_depths']
                         st.success("Data imported successfully!")
                         st.rerun()
                 except Exception as e:
@@ -737,7 +960,7 @@ def main():
         # Phase 1: Entity Setup
         phase_1_entity_setup()
         
-    else:  # Phase 2
+    elif st.session_state.current_phase == 2:
         # Phase 2: Tranche Setup
         col1, col2 = st.columns([1, 1])
         
@@ -746,11 +969,28 @@ def main():
         
         with col2:
             display_tranches_table()
+    
+    else:  # Phase 3
+        # Phase 3: Quoting Depths
+        col1, col2 = st.columns([1, 1])
         
-        # Calculation section (only show if tranches exist)
+        with col1:
+            phase_3_quoting_depths()
+        
+        with col2:
+            display_quoting_depths_table()
+        
+        # Calculation section (only show if tranches exist and all entities have quoting depths)
         if st.session_state.tranches_data:
-            calculate_options(params)
-            display_results(params)
+            # Check if all entities have quoting depth data
+            entities_with_depths = set(entry['entity'] for entry in st.session_state.quoting_depths_data)
+            required_entities = set(tranche['entity'] for tranche in st.session_state.tranches_data)
+            
+            if required_entities.issubset(entities_with_depths):
+                calculate_options(params)
+                display_results(params)
+            else:
+                st.warning("Please add quoting depths for all entities before calculating options.")
     
     # Footer
     st.markdown("---")
