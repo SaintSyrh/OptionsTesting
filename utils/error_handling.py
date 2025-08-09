@@ -252,5 +252,206 @@ class SafeOperations:
             return default
 
 
+# Additional validation utilities for the refactored architecture
+
+def validate_option_parameters(S: float, K: float, T: float, r: float, sigma: float) -> Dict[str, float]:
+    """
+    Validate Black-Scholes option parameters
+    
+    Args:
+        S: Spot price
+        K: Strike price  
+        T: Time to expiration
+        r: Risk-free rate
+        sigma: Volatility
+    
+    Returns:
+        Dictionary of validated parameters
+    
+    Raises:
+        ValidationError: If any parameter is invalid
+    """
+    try:
+        ParameterValidator.validate_positive(S, "Spot price (S)")
+        ParameterValidator.validate_positive(K, "Strike price (K)")
+        ParameterValidator.validate_positive(T, "Time to expiration (T)")
+        
+        if r < -0.1 or r > 1.0:  # Reasonable bounds for interest rates
+            raise ValueError(f"Risk-free rate seems unrealistic: {r}")
+        
+        ParameterValidator.validate_positive(sigma, "Volatility (σ)")
+        if sigma > 10.0:  # 1000% volatility seems unrealistic
+            raise ValueError(f"Volatility seems too high: {sigma}")
+        
+        return {'S': S, 'K': K, 'T': T, 'r': r, 'sigma': sigma}
+    except Exception as e:
+        raise ValidationError(f"Invalid option parameters: {str(e)}")
+
+
+def validate_percentage_input(value: Union[int, float], field_name: str, allow_negative: bool = False) -> float:
+    """
+    Validate percentage input and convert to decimal
+    
+    Args:
+        value: Input value as percentage (e.g., 10 for 10%)
+        field_name: Name of field for error messages  
+        allow_negative: Whether negative values are allowed
+    
+    Returns:
+        Value as decimal (e.g., 0.1 for 10%)
+    """
+    try:
+        float_value = float(value)
+        if not allow_negative and float_value < 0:
+            raise ValidationError(f"{field_name} cannot be negative, got {float_value}%")
+        if float_value > 1000:  # Reasonable upper bound
+            raise ValidationError(f"{field_name} seems too large, got {float_value}%")
+        return float_value / 100.0
+    except (ValueError, TypeError):
+        raise ValidationError(f"{field_name} must be a valid number, got {value}")
+
+
+class EntityDataValidator:
+    """Specialized validator for entity data"""
+    
+    @staticmethod
+    def validate_entity(data: Dict[str, Any]) -> Dict[str, str]:
+        """Validate entity data and return validation errors"""
+        errors = {}
+        
+        # Validate name
+        name = data.get('name', '').strip()
+        if not name:
+            errors['name'] = "Entity name is required"
+        elif len(name) > 100:
+            errors['name'] = "Entity name must be less than 100 characters"
+        
+        # Validate loan duration
+        try:
+            loan_duration = int(data.get('loan_duration', 0))
+            if loan_duration <= 0:
+                errors['loan_duration'] = "Loan duration must be positive"
+            elif loan_duration > 1200:  # 100 years seems like a reasonable max
+                errors['loan_duration'] = "Loan duration seems unreasonably long"
+        except (ValueError, TypeError):
+            errors['loan_duration'] = "Loan duration must be a valid number"
+        
+        return errors
+
+
+class OptionDataValidator:
+    """Specialized validator for option contract data"""
+    
+    @staticmethod
+    def validate_option(data: Dict[str, Any]) -> Dict[str, str]:
+        """Validate option contract data and return validation errors"""
+        errors = {}
+        
+        # Validate option type
+        if data.get('option_type') not in ['call', 'put']:
+            errors['option_type'] = "Option type must be 'call' or 'put'"
+        
+        # Validate strike price
+        try:
+            strike_price = float(data.get('strike_price', 0))
+            if strike_price <= 0:
+                errors['strike_price'] = "Strike price must be positive"
+        except (ValueError, TypeError):
+            errors['strike_price'] = "Strike price must be a valid number"
+        
+        # Validate token share percentage
+        try:
+            token_share = float(data.get('token_share_pct', 0))
+            if token_share <= 0 or token_share > 100:
+                errors['token_share_pct'] = "Token share must be between 0 and 100"
+        except (ValueError, TypeError):
+            errors['token_share_pct'] = "Token share must be a valid number"
+        
+        # Validate time to expiration
+        try:
+            time_to_exp = float(data.get('time_to_expiration', 0))
+            if time_to_exp <= 0:
+                errors['time_to_expiration'] = "Time to expiration must be positive"
+        except (ValueError, TypeError):
+            errors['time_to_expiration'] = "Time to expiration must be a valid number"
+        
+        return errors
+
+
+class DepthDataValidator:
+    """Specialized validator for market depth data"""
+    
+    @staticmethod
+    def validate_depth(data: Dict[str, Any]) -> Dict[str, str]:
+        """Validate market depth data and return validation errors"""
+        errors = {}
+        
+        # Validate entity
+        if not data.get('entity', '').strip():
+            errors['entity'] = "Entity is required"
+        
+        # Validate exchange
+        if not data.get('exchange', '').strip():
+            errors['exchange'] = "Exchange is required"
+        
+        # Validate numeric fields
+        numeric_fields = {
+            'spread': 'Bid-ask spread',
+            'depth_50': 'Depth at 50bps',
+            'depth_100': 'Depth at 100bps', 
+            'depth_200': 'Depth at 200bps'
+        }
+        
+        for field, display_name in numeric_fields.items():
+            try:
+                value = float(data.get(field, 0))
+                if value < 0:
+                    errors[field] = f"{display_name} cannot be negative"
+            except (ValueError, TypeError):
+                errors[field] = f"{display_name} must be a valid number"
+        
+        return errors
+
+
+def display_validation_results(validation_errors: Dict[str, str]) -> bool:
+    """
+    Display validation errors to user and return whether validation passed
+    
+    Args:
+        validation_errors: Dictionary of field -> error message
+    
+    Returns:
+        True if validation passed (no errors), False otherwise
+    """
+    if validation_errors:
+        st.error("Please fix the following validation errors:")
+        for field, error in validation_errors.items():
+            st.write(f"• **{field.replace('_', ' ').title()}**: {error}")
+        return False
+    return True
+
+
+def with_error_boundary(title: str = "Error Boundary"):
+    """
+    Decorator that creates an error boundary around Streamlit components
+    
+    Args:
+        title: Title to display in error message
+    """
+    def decorator(func: Callable):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                st.error(f"Error in {title}: {str(e)}")
+                st.write("Please refresh the page or contact support if this error persists.")
+                logger.error(f"Error boundary caught exception in {title}: {e}")
+                logger.debug(f"Full traceback: {traceback.format_exc()}")
+                return None
+        return wrapper
+    return decorator
+
+
 # Global error handler instance
 error_handler_instance = ErrorHandler()
